@@ -1,0 +1,17 @@
+# Secrets: never commit keys
+.env
+.env.*
+!.env.example
+
+# Vexo Open kit is cloned locally (see README), not committed
+vexo-open-kit/
+
+# Local output / tooling
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+audio/transcript.jsonl
+audio/*.ogg
+audio/demo-transcriber.log

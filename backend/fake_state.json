@@ -1,0 +1,160 @@
+{
+ "start_time": 1794686400.0,
+ "now": 1794686580.0,
+ "drifts": [
+  {
+   "drift_id": 1,
+   "start": 1794686438.0,
+   "end": 1794686458.0,
+   "status": "ready"
+  },
+  {
+   "drift_id": 2,
+   "start": 1794686520.0,
+   "end": 1794686536.0,
+   "status": "ready"
+  }
+ ],
+ "transcript": [
+  {
+   "start": 1794686402.0,
+   "end": 1794686407.8,
+   "text": "Okay, today we're starting eigenvalues and eigenvectors."
+  },
+  {
+   "start": 1794686408.8,
+   "end": 1794686416.0,
+   "text": "The big question is: which vectors does a matrix only stretch, without turning?"
+  },
+  {
+   "start": 1794686417.0,
+   "end": 1794686425.5,
+   "text": "If A times v equals lambda times v, then v is an eigenvector and lambda is its eigenvalue."
+  },
+  {
+   "start": 1794686426.5,
+   "end": 1794686433.8,
+   "text": "Lambda tells you how much the vector stretches. Negative means it flips direction."
+  },
+  {
+   "start": 1794686434.8,
+   "end": 1794686441.5,
+   "text": "Let's do an example with the matrix two one, one two."
+  },
+  {
+   "start": 1794686442.5,
+   "end": 1794686450.2,
+   "text": "To find the eigenvalues, we solve the determinant of A minus lambda I equals zero."
+  },
+  {
+   "start": 1794686451.2,
+   "end": 1794686458.5,
+   "text": "That gives us the characteristic polynomial: lambda squared minus four lambda plus three."
+  },
+  {
+   "start": 1794686459.5,
+   "end": 1794686466.0,
+   "text": "Factoring, we get lambda equals one and lambda equals three."
+  },
+  {
+   "start": 1794686467.0,
+   "end": 1794686474.2,
+   "text": "So this matrix stretches some direction by three and another direction by one."
+  },
+  {
+   "start": 1794686475.2,
+   "end": 1794686483.8,
+   "text": "Now for each eigenvalue, we find the eigenvector by solving A minus lambda I times v equals zero."
+  },
+  {
+   "start": 1794686484.8,
+   "end": 1794686491.8,
+   "text": "For lambda equals three, the eigenvector is one one, the diagonal direction."
+  },
+  {
+   "start": 1794686492.8,
+   "end": 1794686499.5,
+   "text": "For lambda equals one, it's one negative one, the other diagonal."
+  },
+  {
+   "start": 1794686500.5,
+   "end": 1794686507.8,
+   "text": "Notice the two eigenvectors are perpendicular. That happens because the matrix is symmetric."
+  },
+  {
+   "start": 1794686508.8,
+   "end": 1794686516.0,
+   "text": "This is a preview of the spectral theorem, which we'll cover next week."
+  },
+  {
+   "start": 1794686517.0,
+   "end": 1794686523.2,
+   "text": "Why do we care? Eigenvectors make repeated multiplication easy."
+  },
+  {
+   "start": 1794686524.2,
+   "end": 1794686531.8,
+   "text": "A to the hundredth times v is just lambda to the hundredth times v."
+  },
+  {
+   "start": 1794686532.8,
+   "end": 1794686539.2,
+   "text": "That's how Google's original PageRank worked: it's an eigenvector problem."
+  },
+  {
+   "start": 1794686540.2,
+   "end": 1794686546.5,
+   "text": "It's also how we analyze stability in differential equations."
+  },
+  {
+   "start": 1794686547.5,
+   "end": 1794686554.5,
+   "text": "For homework, find the eigenvalues of three matrices on problem set seven."
+  },
+  {
+   "start": 1794686555.5,
+   "end": 1794686563.5,
+   "text": "Remember: check your answer by multiplying A times v and seeing if you get lambda v."
+  },
+  {
+   "start": 1794686564.5,
+   "end": 1794686570.5,
+   "text": "Any questions before we move on to diagonalization?"
+  },
+  {
+   "start": 1794686571.5,
+   "end": 1794686578.0,
+   "text": "Okay, diagonalization means writing A as P D P inverse."
+  },
+  {
+   "start": 1794686579.0,
+   "end": 1794686585.8,
+   "text": "D holds the eigenvalues, and P holds the eigenvectors as columns."
+  },
+  {
+   "start": 1794686586.8,
+   "end": 1794686593.0,
+   "text": "Let's try it on our two by two example."
+  },
+  {
+   "start": 1794686594.0,
+   "end": 1794686601.5,
+   "text": "P is one one, one negative one, and D is three zero, zero one."
+  },
+  {
+   "start": 1794686602.5,
+   "end": 1794686609.5,
+   "text": "And that's it for today. Read section five point three before Thursday."
+  }
+ ],
+ "recaps": [
+  {
+   "drift_id": 1,
+   "text": "You missed the first example: for the matrix [[2,1],[1,2]], solving det(A − λI) = 0 gives λ² − 4λ + 3, so the eigenvalues are 3 and 1. The matrix stretches one direction by 3 and another by 1."
+  },
+  {
+   "drift_id": 2,
+   "text": "You missed diagonalization: write A = PDP⁻¹, where D holds the eigenvalues and P holds the eigenvectors as columns. For the example, P = [[1,1],[1,−1]] and D = [[3,0],[0,1]]."
+  }
+ ]
+}

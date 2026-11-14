@@ -1,0 +1,4 @@
+bleak        # Bluetooth to the Vexo band
+certifi      # fixes SSL on some Macs
+pyserial     # only for --usb
+sounddevice  # only for --laptop-mic
