@@ -152,6 +152,12 @@
   .m-when { font: 12.5px/1.7 var(--mono); color: var(--muted); }
   .m-when b { display: block; color: var(--ink); font-weight: 500; }
   .m-text { color: var(--ink-2); }
+  .lect { font-size: 18px; line-height: 1.6; color: var(--ink-2); max-width: 70ch; margin: 0; }
+  .full .line { padding: 4px 10px; }
+  .inline-sum { margin: 8px 0 8px 72px; padding: 10px 14px; border-radius: var(--r-sm); background: var(--surface);
+                border: 1px solid var(--line); color: var(--ink); max-width: 70ch; }
+  .inline-sum small { display: block; font: 12px var(--mono); color: var(--signal-ink); margin-bottom: 3px; }
+  @media (max-width: 820px) { .inline-sum { margin-left: 0; } }
   .spark { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
   .spark div { flex: 0 0 22px; background: var(--bg-2); border-radius: 3px 3px 0 0; }
   .spark div.cur { background: var(--signal); }
@@ -560,7 +566,11 @@ function renderReport() {
       <div class="fig"><b>${fmt(st.longest)}</b><span>longest drift</span></div>
       <div class="fig"><b>${fmt(st.average)}</b><span>average drift</span></div>
     </div>
-    <section class="section cols" style="margin-top:34px">
+    ${an.lecture_summary ? `<section class="section" style="margin-top:34px">
+      <div class="head"><h2>What the lecture covered</h2></div>
+      <p class="lect">${esc(an.lecture_summary)}</p>
+    </section>` : ""}
+    <section class="section cols" style="margin-top:${an.lecture_summary ? 0 : 34}px">
       <div>
         <div class="head"><h2>Why you drifted</h2></div>
         <div class="bars">${st.causes.length ? st.causes.map((c) => `
@@ -593,19 +603,38 @@ function renderReport() {
         <div class="by" style="margin-top:8px">${hist.length > 1 ? `${hist.length - 1} earlier session(s). Today: ${Math.round(st.percent)}%` : "Your first session. Future reports will compare."}</div>
       </div>
     </section>
+    <section class="section">
+      <div class="head"><h2>Full transcript</h2><small>highlighted parts were said while you were away, with a summary of each</small></div>
+      <div class="lines full" style="max-height:none">${fullTranscriptHTML()}</div>
+    </section>
     <div class="r-actions">
       <button class="btn dark" onclick="downloadNotes()">Download notes</button>
       <button class="btn" onclick="startSession()">Start a new session</button>
       <button class="btn ghost" onclick="loadPast()">All past sessions</button>
-      <span class="by">${report.generated_by === "gemini" ? "Analysis by Gemini 4" : "Gemini unavailable, showing a basic analysis"}</span>
+      <span class="by">${{ gemini: "Analysis by Gemini 4", openai: "Analysis by OpenAI" }[report.generated_by] || "AI unavailable, showing a basic analysis"}</span>
     </div>`;
+}
+
+function fullTranscriptHTML() {
+  const T0 = report.start_time, tr = report.transcript || [], drifts = report.stats.drifts;
+  if (!tr.length) return '<div class="none">No transcript was captured this session.</div>';
+  const shown = new Set(); let html = "";
+  for (const l of tr) {
+    const d = drifts.find((x) => l.end >= T0 + x.at && l.start <= T0 + x.at + x.length);
+    if (d && !shown.has(d.drift_id)) {
+      shown.add(d.drift_id);
+      html += `<div class="inline-sum"><small>You zoned out ${fmt(d.at)} to ${fmt(d.at + d.length)}${d.detail ? " · " + esc(d.detail) : ""}</small>${esc(d.recap || "No recap.")}</div>`;
+    }
+    html += `<div class="line${d ? " missed" : ""}"><span class="t">${fmt(l.start - T0)}</span><span>${esc(l.text)}</span></div>`;
+  }
+  return html;
 }
 
 function downloadNotes() {
   const st = report.stats, an = report.analysis, t0 = report.start_time || state.start_time;
   const transcript = report.transcript || state.transcript || [];
   const date = new Date(t0 * 1000).toLocaleString();
-  let md = `# Ketchup notes, ${date}\n\nYou missed **${fmt(st.missed)}** of ${fmt(st.duration)} (${Math.round(st.percent)}%), across ${st.count} drift(s).\n\n${an.headline}\n\n## What you missed\n\n`;
+  let md = `# Ketchup notes, ${date}\n\nYou missed **${fmt(st.missed)}** of ${fmt(st.duration)} (${Math.round(st.percent)}%), across ${st.count} drift(s).\n\n${an.headline}\n\n${an.lecture_summary ? `## What the lecture covered\n\n${an.lecture_summary}\n\n` : ""}## What you missed\n\n`;
   for (const d of st.drifts) {
     md += `### ${fmt(d.at)} to ${fmt(d.at + d.length)}${d.detail ? ` (${d.detail})` : ""}\n\n**Summary:** ${d.recap || "No recap."}\n\n`;
     const ls = linesBetween(transcript, t0 + d.at, t0 + d.at + d.length);

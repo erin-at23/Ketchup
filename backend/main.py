@@ -39,6 +39,12 @@ from pydantic import BaseModel
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+# which AI writes recaps/answers/reports: "openai" or "gemini". The other one is the backup.
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or ("openai" if OPENAI_API_KEY else "gemini")).strip().lower()
+LAST_PROVIDER = {"name": None}
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-hydrogen")  # fast Gemini 4, free tier (builder guide)
 GEMINI_THINKING = os.getenv("GEMINI_THINKING", "low")  # hydrogen: low | medium | high | xhigh (never "minimal")
 # Wait for late transcript lines. P2 stops streaming when focus returns and its last words
@@ -310,8 +316,40 @@ def ask_gemini(prompt):
     return out
 
 
-def call_gemini(text):
-    return ask_gemini(PROMPT.format(transcript=text))
+def ask_openai(prompt):
+    import requests
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    r = requests.post(f"{OPENAI_BASE_URL}/chat/completions",
+                      headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                      json={"model": OPENAI_MODEL, "messages": [{"role": "user", "content": prompt}]},
+                      timeout=25)
+    if r.status_code != 200:
+        raise RuntimeError(f"OpenAI {r.status_code}: {r.text[:200]}")
+    out = (r.json()["choices"][0]["message"]["content"] or "").strip()
+    if not out:
+        raise RuntimeError("empty OpenAI response")
+    return out
+
+
+def ask_llm(prompt):
+    """Ask the chosen AI (LLM_PROVIDER); if it fails, try the other one."""
+    order = [("openai", ask_openai), ("gemini", ask_gemini)]
+    if LLM_PROVIDER != "openai":
+        order.reverse()
+    errors = []
+    for name, fn in order:
+        try:
+            out = fn(prompt)
+            LAST_PROVIDER["name"] = name
+            return out
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}: {e}")
+    raise RuntimeError(" | ".join(errors))
+
+
+def call_gemini(text):  # name kept for older code paths; uses whichever AI is configured
+    return ask_llm(PROMPT.format(transcript=text))
 
 
 async def make_recap(session_id, drift_id):
@@ -326,9 +364,9 @@ async def make_recap(session_id, drift_id):
         recap = EMPTY_RECAP
     else:
         try:
-            recap = await asyncio.wait_for(asyncio.to_thread(call_gemini, text), GEMINI_TIMEOUT)
+            recap = await asyncio.wait_for(asyncio.to_thread(call_gemini, text), GEMINI_TIMEOUT + 10)
         except Exception as e:  # noqa: BLE001 - never let a recap failure break the demo
-            log.warning("Gemini failed (%s); using fallback", e)
+            log.warning("AI recap failed (%s); using fallback", e)
             recap = fallback_recap(text)
     if S["session_id"] != session_id:
         return
@@ -447,12 +485,12 @@ async def ask(body: AskBody):
                 "drift_id": drift and drift["drift_id"]}
     try:
         answer = await asyncio.wait_for(
-            asyncio.to_thread(ask_gemini, ASK_PROMPT.format(context=context, question=body.question.strip()[:500])),
-            GEMINI_TIMEOUT + 5)
+            asyncio.to_thread(ask_llm, ASK_PROMPT.format(context=context, question=body.question.strip()[:500])),
+            GEMINI_TIMEOUT + 20)
     except Exception as e:  # noqa: BLE001
-        log.warning("Gemini /ask failed (%s)", e)
-        answer = "I couldn't reach Gemini just now. Here's what was said: " + \
-                 " ".join(l["text"] for l in missed_lines(drift))[:400] if drift else "I couldn't reach Gemini just now."
+        log.warning("AI /ask failed (%s)", e)
+        answer = "I couldn't reach the AI just now. Here's what was said: " + \
+                 " ".join(l["text"] for l in missed_lines(drift))[:400] if drift else "I couldn't reach the AI just now."
     return {"answer": answer, "drift_id": drift and drift["drift_id"]}
 
 
@@ -517,7 +555,8 @@ SUMMARY_PROMPT = (
     '  "headline": one sentence summing up their focus today (specific, kind, no fluff),\n'
     '  "missed_topics": 2-5 short phrases naming the concepts they missed,\n'
     '  "patterns": 2-4 short observations about when and why they drift (use earlier sessions if any),\n'
-    '  "tips": 3 concrete, specific things to try next class, tied to their actual causes.\n'
+    '  "tips": 3 concrete, specific things to try next class, tied to their actual causes,\n'
+    '  "lecture_summary": 3-6 sentences summarizing what the whole lecture covered, in order.\n'
     "Speak to the student as \"you\"."
 )
 
@@ -533,6 +572,7 @@ def _fallback_analysis(st):
                     + ([f"More drifts in the {'second' if st['second_half'] > st['first_half'] else 'first'} half of class."]
                        if st["count"] > 1 and st["first_half"] != st["second_half"] else []),
         "tips": [TIPS.get(c["cause"], TIPS["manual"]) for c in causes][:3] or [TIPS["manual"]],
+        "lecture_summary": " ".join(" ".join(l["text"] for l in S["transcript"]).split()[:80]),
     }
 
 
@@ -552,15 +592,16 @@ async def _build_summary():
     transcript = " ".join(l["text"] for l in S["transcript"])[-MAX_INPUT_CHARS:] or "(none)"
     analysis, by = None, "fallback"
     try:
-        raw = await asyncio.wait_for(asyncio.to_thread(ask_gemini, SUMMARY_PROMPT.format(
-            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript)), GEMINI_TIMEOUT + 15)
+        raw = await asyncio.wait_for(asyncio.to_thread(ask_llm, SUMMARY_PROMPT.format(
+            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript)), GEMINI_TIMEOUT + 40)
         analysis = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
         for k in ("missed_topics", "patterns", "tips"):
             analysis[k] = [str(x) for x in analysis.get(k, [])][:5]
         analysis["headline"] = str(analysis.get("headline", ""))
-        by = "gemini"
+        analysis["lecture_summary"] = str(analysis.get("lecture_summary", ""))
+        by = LAST_PROVIDER["name"] or LLM_PROVIDER
     except Exception as e:  # noqa: BLE001
-        log.warning("Gemini summary failed (%s); using fallback", e)
+        log.warning("AI summary failed (%s); using fallback", e)
     analysis = analysis or _fallback_analysis(st)
     summary = {"session_id": S["session_id"], "date": time.strftime("%a %b %d, %I:%M %p"),
                "start_time": S["start_time"], "transcript": S["transcript"],
@@ -590,7 +631,7 @@ async def session_end():
             if d["end"] is None:
                 d["end"], d["status"] = S["ended_at"], "pending"
                 asyncio.create_task(make_recap(sid, d["drift_id"]))
-    deadline = time.time() + RECAP_DELAY + GEMINI_TIMEOUT + 4
+    deadline = time.time() + RECAP_DELAY + GEMINI_TIMEOUT + 14
     while any(d["status"] != "ready" for d in S["drifts"].values()) and time.time() < deadline:
         await asyncio.sleep(0.5)
     summary = await _build_summary()
