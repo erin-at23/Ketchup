@@ -1,0 +1,21 @@
+{
+  "inlier_threshold": 25,
+  "away_seconds": 5.0,
+  "screen_drift_seconds": 2.0,
+  "phone_only_seconds": 3.0,
+  "return_seconds": 2.0,
+  "merge_gap_seconds": 3.0,
+  "unrelated_confidence": 0.7,
+  "verdict_ttl_seconds": 6.0,
+  "histogram_change": 0.7,
+  "detector_score": 0.35,
+  "laptop_min_area": 0.04,
+  "ref_refresh_seconds": 10.0,
+  "gemini_timeout": 4.0,
+  "transcript_seconds": 60,
+  "openai_image_detail": "low",
+  "openai_extra": {},
+  "object_hold_seconds": 1.5,
+  "max_targets": 6,
+  "away_backdate_max_seconds": 3.0
+}

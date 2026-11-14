@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+efficientdet_lite0.tflite
+drift_log.jsonl
+*.mp4
+*.mov
+.DS_Store
