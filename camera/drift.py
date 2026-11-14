@@ -429,7 +429,7 @@ class Judge:
                 {"text": prompt},
                 {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
             ]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+            "generationConfig": {"responseMimeType": "application/json"},  # Gemini 4 rejects temperature
         }
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         r = requests.post(url, headers={"x-goog-api-key": self.key}, json=body, timeout=self.cfg["gemini_timeout"])

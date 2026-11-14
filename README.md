@@ -60,6 +60,7 @@ Teammate on another laptop and the venue Wi-Fi blocks it? `cloudflared tunnel --
 | `POST /drift/start` | camera, page | `{start, cause?, detail?}` → `{drift_id}` |
 | `POST /drift/end` | camera, page | `{drift_id, end}` |
 | `POST /transcript` | audio | `{start, end, text}` |
+| `GET /transcript?since=` | camera | → `{transcript}` recent lines for the relevance check |
 | `GET /focus` | audio | → `{focused}` (false while a drift is open) |
 | `GET /state` | page | drifts, transcript, recaps |
 | `GET /recap/latest` | page | → `{status: none\|pending\|ready, drift_id, text}` |

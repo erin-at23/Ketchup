@@ -11,6 +11,7 @@ Contract (all times are Unix epoch seconds, floats):
   POST /transcript      {start, end, text}                   -> {ok: true}
   GET  /state                                                -> {start_time, now, drifts, transcript, recaps}
   GET  /recap/latest                                         -> {status: none|pending|ready, drift_id, text}
+  GET  /transcript?since=<epoch>                             -> {transcript: [...]}  (camera's relevance check)
   GET  /focus                                                -> {focused: bool}  (false while a drift is open; P2 polls it)
 Every POST returns 409 if no session has started.
 """
@@ -209,6 +210,15 @@ async def state():
         "transcript": S["transcript"],
         "recaps": sorted(S["recaps"].values(), key=lambda r: r["drift_id"]),
     }
+
+
+@app.get("/transcript")
+async def transcript_recent(since: Optional[float] = None):
+    """Recent lines for the camera's relevance check (P1): GET /transcript?since=<epoch>."""
+    lines = load_fake()["transcript"] if FAKE_MODE else S["transcript"]
+    if since is not None:
+        lines = [l for l in lines if l["end"] >= since]
+    return {"transcript": lines}
 
 
 @app.get("/focus")
