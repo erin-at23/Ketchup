@@ -201,6 +201,27 @@ class Backend(threading.Thread):
 
 # ---------------------------------------------------------------- step 1: on target?
 
+class Heartbeat(threading.Thread):
+    """Tells the backend every 2 s that the camera is running and what it sees, so the
+    Ketchup page can show a live camera status. Never blocks the video loop."""
+
+    def __init__(self, api):
+        super().__init__(daemon=True)
+        self.url = api.rstrip("/") + "/camera/ping" if api else None
+        self.info = {}
+
+    def update(self, **info):
+        self.info = info
+
+    def run(self):
+        while self.url:
+            try:
+                requests.post(self.url, json=self.info, timeout=1.5)
+            except Exception:
+                pass
+            time.sleep(2)
+
+
 class TargetMatcher:
     def __init__(self, max_targets=6):
         self.orb = cv2.ORB_create(nfeatures=1000)
@@ -610,6 +631,8 @@ def main():
 
     backend = Backend(api, args.dry)
     backend.start()
+    beat = Heartbeat(None if args.dry else api)
+    beat.start()
     matcher = TargetMatcher(cfg["max_targets"])
     detector = ScreenDetector(cfg["detector_score"])
     judge = Judge(cfg, api)
@@ -752,6 +775,7 @@ def main():
             machine.update(now, status, cand)
             # without a target nothing is judged; don't show a misleading FOCUSED
             shown_state = "NO TARGET (press c)" if not matcher.refs and machine.state == "FOCUSED" else machine.state
+            beat.update(state=shown_state, why=why, match=inliers, thr=thr, targets=len(matcher.refs))
 
             if args.verbose and now - last_print >= 1.0:
                 last_print = now

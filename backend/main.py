@@ -14,6 +14,8 @@ Contract (all times are Unix epoch seconds, floats):
   GET  /transcript?since=<epoch>                             -> {transcript: [...]}  (camera's relevance check)
   POST /session/end                                          -> report (stats + Gemini analysis)
   POST /ask             {question, drift_id?}                -> {answer}
+  GET  /sessions, GET /sessions/{id}                          -> past sessions + their reports
+  POST /camera/ping                                          -> camera heartbeat (shown on the page)
   GET  /focus                                                -> {focused: bool}  (false while a drift is open; P2 polls it)
 Every POST returns 409 if no session has started.
 """
@@ -87,6 +89,7 @@ S = {
 }
 
 _gemini = None
+CAMERA = {"t": 0.0}  # last heartbeat from the camera script (camera/drift.py)
 
 
 def gemini():
@@ -137,7 +140,7 @@ class Line(BaseModel):
 async def log_requests(request: Request, call_next):
     t0 = time.time()
     response = await call_next(request)
-    if request.url.path not in ("/state", "/focus"):  # polled constantly; would flood the log
+    if request.url.path not in ("/state", "/focus", "/camera/ping"):  # polled constantly; would flood the log
         log.info("%s %s -> %s (%.0f ms)", request.method, request.url.path,
                  response.status_code, (time.time() - t0) * 1000)
     return response
@@ -194,6 +197,22 @@ async def drift_end(body: DriftEnd):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- camera status
+class CameraPing(BaseModel):
+    state: Optional[str] = None
+    why: Optional[str] = None
+    match: Optional[int] = None
+    thr: Optional[int] = None
+    targets: Optional[int] = None
+
+
+@app.post("/camera/ping")
+async def camera_ping(body: CameraPing):
+    """Heartbeat from camera/drift.py every 2 s (works with or without a session)."""
+    CAMERA.update(body.model_dump(), t=time.time())
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- transcript
 @app.post("/transcript")
 async def transcript(body: Line):
@@ -218,6 +237,7 @@ async def state():
         "start_time": S["start_time"],
         "now": S["ended_at"] or time.time(),
         "ended_at": S["ended_at"],
+        "camera": {**CAMERA, "connected": time.time() - CAMERA["t"] < 6},
         "drifts": sorted(S["drifts"].values(), key=lambda d: d["drift_id"]),
         "transcript": S["transcript"],
         "recaps": sorted(S["recaps"].values(), key=lambda r: r["drift_id"]),
@@ -539,14 +559,17 @@ async def _build_summary():
     except Exception as e:  # noqa: BLE001
         log.warning("Gemini summary failed (%s); using fallback", e)
     analysis = analysis or _fallback_analysis(st)
-    summary = {"session_id": S["session_id"], "stats": st, "analysis": analysis, "generated_by": by,
+    summary = {"session_id": S["session_id"], "date": time.strftime("%a %b %d, %I:%M %p"),
+               "start_time": S["start_time"], "transcript": S["transcript"],
+               "stats": st, "analysis": analysis, "generated_by": by,
                "history": [{"date": h.get("date"), "percent": h["percent"]} for h in history]}
     try:
         all_hist = _load_history()
-        all_hist.append({"date": time.strftime("%b %d %H:%M"), "percent": st["percent"],
+        all_hist.append({"id": S["session_id"], "date": time.strftime("%b %d %H:%M"), "percent": st["percent"],
                          "duration": st["duration"], "count": st["count"],
-                         "causes": [{k: c[k] for k in ("cause", "label", "count", "seconds")} for c in st["causes"]]})
-        HISTORY_FILE.write_text(json.dumps(all_hist[-50:], indent=1))
+                         "causes": [{k: c[k] for k in ("cause", "label", "count", "seconds")} for c in st["causes"]],
+                         "summary": summary})
+        HISTORY_FILE.write_text(json.dumps(all_hist[-30:]))
     except Exception as e:  # noqa: BLE001
         log.warning("could not save session history (%s)", e)
     return summary
@@ -580,3 +603,24 @@ async def session_summary():
     if S["summary"] is None:
         raise HTTPException(status_code=404, detail="Session not ended yet")
     return S["summary"]
+
+
+# ---------------------------------------------------------------- past sessions
+@app.get("/sessions")
+async def sessions_list():
+    """Past sessions, newest first (from sessions.json)."""
+    out = []
+    for h in reversed(_load_history()):
+        out.append({"id": h.get("id"), "date": (h.get("summary") or {}).get("date") or h.get("date"),
+                    "percent": h.get("percent"), "duration": h.get("duration"), "count": h.get("count"),
+                    "top": (h.get("causes") or [{}])[0].get("label") if h.get("causes") else None,
+                    "has_report": "summary" in h})
+    return {"sessions": out}
+
+
+@app.get("/sessions/{sid}")
+async def sessions_get(sid: str):
+    for h in _load_history():
+        if h.get("id") == sid and "summary" in h:
+            return h["summary"]
+    raise HTTPException(status_code=404, detail="No saved report for that session")
