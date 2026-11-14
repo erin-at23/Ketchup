@@ -12,6 +12,8 @@ Contract (all times are Unix epoch seconds, floats):
   GET  /state                                                -> {start_time, now, drifts, transcript, recaps}
   GET  /recap/latest                                         -> {status: none|pending|ready, drift_id, text}
   GET  /transcript?since=<epoch>                             -> {transcript: [...]}  (camera's relevance check)
+  POST /session/end                                          -> report (stats + Gemini analysis)
+  POST /ask             {question, drift_id?}                -> {answer}
   GET  /focus                                                -> {focused: bool}  (false while a drift is open; P2 polls it)
 Every POST returns 409 if no session has started.
 """
@@ -46,6 +48,7 @@ MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "6000"))
 FAKE_MODE = os.getenv("FAKE_MODE", "0") == "1"
 FAKE_FILE = Path(__file__).parent / "fake_state.json"
 UI_FILE = Path(__file__).parent / "static" / "index.html"
+HISTORY_FILE = Path(__file__).parent / "sessions.json"  # past session stats, for "what do I usually miss"
 
 # ElevenLabs (recap voice). If the key is missing or the call fails, the page falls back to the
 # browser's built-in voice, so the demo still speaks.
@@ -79,6 +82,8 @@ S = {
     "transcript": [],   # [{start, end, text}]
     "recaps": {},       # drift_id -> {drift_id, text}
     "next_id": 1,
+    "ended_at": None,
+    "summary": None,
 }
 
 _gemini = None
@@ -97,6 +102,12 @@ def require_session():
         return
     if S["session_id"] is None:
         raise HTTPException(status_code=409, detail="No session started. Call POST /session/start.")
+
+
+def require_live():
+    require_session()
+    if S["ended_at"] is not None:
+        raise HTTPException(status_code=409, detail="Session ended. Start a new session.")
 
 
 def load_fake():
@@ -140,7 +151,7 @@ async def session_start():
         return {"session_id": "fake", "start_time": fake["start_time"]}
     AUDIO.clear()
     S.update(session_id=uuid.uuid4().hex[:8], start_time=time.time(),
-             drifts={}, transcript=[], recaps={}, next_id=1)
+             drifts={}, transcript=[], recaps={}, next_id=1, ended_at=None, summary=None)
     log.info("session %s started", S["session_id"])
     return {"session_id": S["session_id"], "start_time": S["start_time"]}
 
@@ -157,7 +168,7 @@ async def session_get():
 # ---------------------------------------------------------------- drifts
 @app.post("/drift/start")
 async def drift_start(body: DriftStart):
-    require_session()
+    require_live()
     if FAKE_MODE:
         return {"drift_id": 99}
     drift_id = S["next_id"]
@@ -186,7 +197,7 @@ async def drift_end(body: DriftEnd):
 # ---------------------------------------------------------------- transcript
 @app.post("/transcript")
 async def transcript(body: Line):
-    require_session()
+    require_live()
     if FAKE_MODE:
         return {"ok": True}
     text = body.text.strip()
@@ -205,7 +216,8 @@ async def state():
         return fake
     return {
         "start_time": S["start_time"],
-        "now": time.time(),
+        "now": S["ended_at"] or time.time(),
+        "ended_at": S["ended_at"],
         "drifts": sorted(S["drifts"].values(), key=lambda d: d["drift_id"]),
         "transcript": S["transcript"],
         "recaps": sorted(S["recaps"].values(), key=lambda r: r["drift_id"]),
@@ -247,7 +259,7 @@ async def recap_latest():
 
 # ---------------------------------------------------------------- recap logic
 def missed_lines(drift):
-    lo, hi = drift["start"] - PAD_BEFORE, drift["end"] + PAD_AFTER
+    lo, hi = drift["start"] - PAD_BEFORE, (drift["end"] or time.time()) + PAD_AFTER
     return [l for l in S["transcript"] if l["end"] >= lo and l["start"] <= hi]
 
 
@@ -258,7 +270,7 @@ def fallback_recap(text):
     return "You missed this: " + short + ("..." if len(words) > 45 else "")
 
 
-def call_gemini(text):
+def ask_gemini(prompt):
     """Gemini 4 via the Interactions API (google-genai >= 3.2.0), per the hackathon builder guide.
     Gemini 4 models reject temperature/top_p/top_k, so only thinking_level is set."""
     client = gemini()
@@ -266,13 +278,17 @@ def call_gemini(text):
         raise RuntimeError("GEMINI_API_KEY not set")
     resp = client.interactions.create(
         model=GEMINI_MODEL,
-        input=PROMPT.format(transcript=text),
+        input=prompt,
         generation_config={"thinking_level": GEMINI_THINKING},
     )
     out = (resp.output_text or "").strip()
     if not out:
         raise RuntimeError("empty Gemini response")
     return out
+
+
+def call_gemini(text):
+    return ask_gemini(PROMPT.format(transcript=text))
 
 
 async def make_recap(session_id, drift_id):
@@ -338,3 +354,229 @@ async def recap_audio(drift_id: int):
             log.warning("ElevenLabs failed (%s)", e)
             raise HTTPException(status_code=503, detail=str(e))
     return Response(content=AUDIO[drift_id], media_type="audio/mpeg")
+
+
+class SpeakBody(BaseModel):
+    text: str
+
+
+@app.post("/speak")
+async def speak(body: SpeakBody):
+    """MP3 of any short text (answers to questions) in the ElevenLabs voice. 503 = use the browser voice."""
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=503, detail="ELEVENLABS_API_KEY not set")
+    try:
+        audio = await asyncio.to_thread(tts, body.text[:1200])
+    except Exception as e:  # noqa: BLE001
+        log.warning("ElevenLabs failed (%s)", e)
+        raise HTTPException(status_code=503, detail=str(e))
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+# ---------------------------------------------------------------- ask about what you missed
+class AskBody(BaseModel):
+    question: str
+    drift_id: Optional[int] = None
+
+
+ASK_PROMPT = (
+    "You help a student catch up on a lecture they zoned out of. Below is the lecture transcript "
+    "(speech-to-text, may contain errors). The part they MISSED is marked between <missed> tags; "
+    "the rest is surrounding context.\n\n{context}\n\n"
+    "Student's question: {question}\n\n"
+    "Answer in under 70 words, speaking directly to the student. Use only the transcript. "
+    "If it doesn't cover the question, say so briefly. No intro."
+)
+
+
+def _fmt_rel(t):
+    s = max(0, int(t - (S["start_time"] or t)))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _context_for(drift):
+    lo, hi = drift["start"] - PAD_BEFORE, (drift["end"] or time.time()) + PAD_AFTER
+    out = []
+    for l in S["transcript"]:
+        if l["end"] < lo - 90 or l["start"] > hi + 60:
+            continue
+        missed = l["end"] >= lo and l["start"] <= hi
+        line = f"[{_fmt_rel(l['start'])}] {l['text']}"
+        out.append(f"<missed>{line}</missed>" if missed else line)
+    return "\n".join(out)[-MAX_INPUT_CHARS:]
+
+
+@app.post("/ask")
+async def ask(body: AskBody):
+    require_session()
+    drifts = sorted(S["drifts"].values(), key=lambda d: d["start"])
+    if body.drift_id is not None:
+        drift = S["drifts"].get(body.drift_id)
+    else:
+        ended = [d for d in drifts if d["end"] is not None]
+        drift = (ended or drifts)[-1] if drifts else None
+    if drift is None:
+        context = "\n".join(f"[{_fmt_rel(l['start'])}] {l['text']}" for l in S["transcript"])[-MAX_INPUT_CHARS:]
+    else:
+        context = _context_for(drift)
+    if not context.strip():
+        return {"answer": "There's no transcript for that part yet, so I can't answer.",
+                "drift_id": drift and drift["drift_id"]}
+    try:
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(ask_gemini, ASK_PROMPT.format(context=context, question=body.question.strip()[:500])),
+            GEMINI_TIMEOUT + 5)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini /ask failed (%s)", e)
+        answer = "I couldn't reach Gemini just now. Here's what was said: " + \
+                 " ".join(l["text"] for l in missed_lines(drift))[:400] if drift else "I couldn't reach Gemini just now."
+    return {"answer": answer, "drift_id": drift and drift["drift_id"]}
+
+
+# ---------------------------------------------------------------- end session + report
+CAUSE_LABEL = {
+    "away": "Looked away", "phone": "Phone", "unrelated_screen": "Unrelated screen",
+    "manual": "Marked by hand", "eyes_closed": "Eyes closed", None: "Marked by hand",
+}
+
+TIPS = {
+    "phone": "Put your phone face down in your bag before class starts; a phone in view pulls attention even when you don't touch it.",
+    "unrelated_screen": "Close every tab except the slides or notes, or use a site blocker during lecture hours.",
+    "away": "Sit closer to the front and take notes by hand; writing keeps your eyes on the board.",
+    "eyes_closed": "You may be tired: get up at the break, drink water, and aim for more sleep before this class.",
+    "manual": "Right after you zone out, write down the last thing you heard; it makes catching up faster.",
+}
+
+
+def _load_history():
+    try:
+        return json.loads(HISTORY_FILE.read_text())
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _stats():
+    t0, t1 = S["start_time"], S["ended_at"] or time.time()
+    dur = max(1.0, t1 - t0)
+    rows, causes, missed = [], {}, 0.0
+    for d in sorted(S["drifts"].values(), key=lambda d: d["start"]):
+        a, b = max(d["start"], t0), min(d["end"] or t1, t1)
+        length = max(0.0, b - a)
+        missed += length
+        key = d.get("cause") or "manual"
+        c = causes.setdefault(key, {"cause": key, "label": CAUSE_LABEL.get(key, key.replace("_", " ").capitalize()),
+                                    "count": 0, "seconds": 0.0})
+        c["count"] += 1
+        c["seconds"] += length
+        rec = S["recaps"].get(d["drift_id"], {}).get("text")
+        rows.append({"drift_id": d["drift_id"], "at": a - t0, "length": length, "cause": key,
+                     "label": c["label"], "detail": d.get("detail"), "recap": rec})
+    half = t0 + dur / 2
+    first_half = sum(1 for d in S["drifts"].values() if d["start"] < half)
+    return {
+        "duration": dur, "missed": missed, "percent": round(100 * missed / dur, 1),
+        "count": len(rows), "longest": max((r["length"] for r in rows), default=0.0),
+        "average": (missed / len(rows)) if rows else 0.0,
+        "first_half": first_half, "second_half": len(rows) - first_half,
+        "causes": sorted(causes.values(), key=lambda c: -c["seconds"]),
+        "drifts": rows,
+    }
+
+
+SUMMARY_PROMPT = (
+    "You are a friendly study coach. A student just finished a lecture while a wearable tracked when they "
+    "zoned out. Write their end-of-class report.\n\n"
+    "THIS SESSION (seconds):\n{stats}\n\n"
+    "WHAT THEY MISSED, per drift (time into class, length, why, transcript recap):\n{drifts}\n\n"
+    "EARLIER SESSIONS (most recent last):\n{history}\n\n"
+    "LECTURE TRANSCRIPT (may be partial):\n{transcript}\n\n"
+    "Return ONLY a JSON object with these keys:\n"
+    '  "headline": one sentence summing up their focus today (specific, kind, no fluff),\n'
+    '  "missed_topics": 2-5 short phrases naming the concepts they missed,\n'
+    '  "patterns": 2-4 short observations about when and why they drift (use earlier sessions if any),\n'
+    '  "tips": 3 concrete, specific things to try next class, tied to their actual causes.\n'
+    "Speak to the student as \"you\"."
+)
+
+
+def _fallback_analysis(st):
+    causes = st["causes"]
+    top = causes[0]["label"].lower() if causes else None
+    return {
+        "headline": (f"You stayed with the lecture {100 - st['percent']:.0f}% of the time"
+                     + (f"; most of what you missed came from: {top}." if top else ".")),
+        "missed_topics": [r["recap"].split(". ")[0][:90] for r in st["drifts"] if r["recap"]][:5],
+        "patterns": [f"{c['label']}: {c['count']} time(s), {int(c['seconds'])} s" for c in causes][:4]
+                    + ([f"More drifts in the {'second' if st['second_half'] > st['first_half'] else 'first'} half of class."]
+                       if st["count"] > 1 and st["first_half"] != st["second_half"] else []),
+        "tips": [TIPS.get(c["cause"], TIPS["manual"]) for c in causes][:3] or [TIPS["manual"]],
+    }
+
+
+async def _build_summary():
+    st = _stats()
+    history = _load_history()[-5:]
+    hist_txt = "\n".join(
+        f"- {h.get('date', '?')}: missed {h['percent']}% over {int(h['duration'] // 60)} min; causes: "
+        + ", ".join(f"{c['label']} x{c['count']}" for c in h.get("causes", []))
+        for h in history) or "(none)"
+    drift_txt = "\n".join(
+        f"- at {int(r['at'] // 60)}:{int(r['at'] % 60):02d}, {int(r['length'])} s, {r['label']}"
+        + (f" ({r['detail']})" if r["detail"] else "") + f": {r['recap'] or '(no recap)'}"
+        for r in st["drifts"]) or "(no drifts)"
+    stats_txt = json.dumps({k: (round(v, 1) if isinstance(v, float) else v) for k, v in st.items()
+                            if k not in ("drifts", "causes")})
+    transcript = " ".join(l["text"] for l in S["transcript"])[-MAX_INPUT_CHARS:] or "(none)"
+    analysis, by = None, "fallback"
+    try:
+        raw = await asyncio.wait_for(asyncio.to_thread(ask_gemini, SUMMARY_PROMPT.format(
+            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript)), GEMINI_TIMEOUT + 15)
+        analysis = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+        for k in ("missed_topics", "patterns", "tips"):
+            analysis[k] = [str(x) for x in analysis.get(k, [])][:5]
+        analysis["headline"] = str(analysis.get("headline", ""))
+        by = "gemini"
+    except Exception as e:  # noqa: BLE001
+        log.warning("Gemini summary failed (%s); using fallback", e)
+    analysis = analysis or _fallback_analysis(st)
+    summary = {"session_id": S["session_id"], "stats": st, "analysis": analysis, "generated_by": by,
+               "history": [{"date": h.get("date"), "percent": h["percent"]} for h in history]}
+    try:
+        all_hist = _load_history()
+        all_hist.append({"date": time.strftime("%b %d %H:%M"), "percent": st["percent"],
+                         "duration": st["duration"], "count": st["count"],
+                         "causes": [{k: c[k] for k in ("cause", "label", "count", "seconds")} for c in st["causes"]]})
+        HISTORY_FILE.write_text(json.dumps(all_hist[-50:], indent=1))
+    except Exception as e:  # noqa: BLE001
+        log.warning("could not save session history (%s)", e)
+    return summary
+
+
+@app.post("/session/end")
+async def session_end():
+    require_session()
+    if S["summary"] is not None:
+        return S["summary"]
+    sid = S["session_id"]
+    if S["ended_at"] is None:
+        S["ended_at"] = time.time()
+        for d in S["drifts"].values():  # close any drift still open
+            if d["end"] is None:
+                d["end"], d["status"] = S["ended_at"], "pending"
+                asyncio.create_task(make_recap(sid, d["drift_id"]))
+    deadline = time.time() + RECAP_DELAY + GEMINI_TIMEOUT + 4
+    while any(d["status"] != "ready" for d in S["drifts"].values()) and time.time() < deadline:
+        await asyncio.sleep(0.5)
+    summary = await _build_summary()
+    if S["session_id"] == sid:
+        S["summary"] = summary
+    log.info("session %s ended: missed %.0f%% (%d drifts), report by %s",
+             sid, summary["stats"]["percent"], summary["stats"]["count"], summary["generated_by"])
+    return summary
+
+
+@app.get("/session/summary")
+async def session_summary():
+    if S["summary"] is None:
+        raise HTTPException(status_code=404, detail="Session not ended yet")
+    return S["summary"]

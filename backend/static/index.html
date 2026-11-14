@@ -3,329 +3,524 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f3f2ee">
 <title>Ketchup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#eef0f4; --muted:#8b93a3;
-          --red:#ff4d5e; --red-soft:#ff4d5e55; --amber:#ffb547; --green:#3ddc97; --blue:#6aa8ff; }
+  :root {
+    --bg: #f3f2ee; --bg-2: #eae8e2; --surface: #fbfaf8;
+    --line: rgba(22, 21, 19, 0.09); --line-2: rgba(22, 21, 19, 0.17);
+    --ink: #161513; --ink-2: #44423d; --muted: #7b7871; --faint: #b5b2aa;
+    --signal: #e2501d; --signal-ink: #b93c10; --signal-bg: rgba(226, 80, 29, 0.08);
+    --ok: #2c7a4b; --on-ink: #f3f2ee;
+    --shadow: 0 1px 0 rgba(22, 21, 19, 0.04), 0 12px 32px -18px rgba(40, 32, 20, 0.22);
+    --sans: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --gutter: clamp(16px, 4vw, 40px); --maxw: 1200px; --r-sm: 6px; --r: 10px;
+  }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
-  header { display:flex; align-items:center; gap:16px; padding:18px 28px; border-bottom:1px solid var(--line); }
-  h1 { font-size:26px; margin:0; letter-spacing:-0.5px; }
-  .tag { color:var(--muted); font-size:15px; }
-  .spacer { flex:1; }
-  .status { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; }
-  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
-  .dot.ok { background:var(--green); } .dot.bad { background:var(--red); }
-  button { font:inherit; border:1px solid var(--line); background:var(--panel); color:var(--text);
-           padding:10px 18px; border-radius:10px; cursor:pointer; }
-  button:hover { border-color:#4a5263; }
-  button.primary { background:var(--blue); border-color:var(--blue); color:#071225; font-weight:600; }
-  button.drift.on { background:var(--red); border-color:var(--red); color:#fff; }
-  main { padding:24px 28px; display:grid; gap:22px; }
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px; }
-  .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  .label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; }
-  #focus { font-size:22px; font-weight:600; }
-  #focus.away { color:var(--red); } #focus.here { color:var(--green); }
-  .track { position:relative; height:64px; background:#11141a; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
-  .seg { position:absolute; top:0; bottom:0; background:var(--red); cursor:pointer; min-width:4px; }
-  .seg.open { background:var(--red-soft); animation:pulse 1s ease-in-out infinite; border-left:2px solid var(--red); }
-  .seg.pending { background:var(--amber); }
-  .seg.selected { outline:3px solid #fff; outline-offset:-3px; }
-  .seg .why { position:absolute; left:8px; right:6px; top:50%; transform:translateY(-50%);
-              font-size:13px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden;
-              text-overflow:ellipsis; text-shadow:0 1px 2px #0008; pointer-events:none; }
-  #why { color:var(--amber); font-size:15px; margin-top:4px; min-height:22px; }
-  @keyframes pulse { 50% { opacity:.55; } }
-  .now { position:absolute; top:0; bottom:0; width:2px; background:var(--blue); }
-  .ticks { position:relative; height:20px; color:var(--muted); font-size:12px; margin-top:6px; }
-  .ticks span { position:absolute; transform:translateX(-50%); }
-  .legend { display:flex; gap:18px; color:var(--muted); font-size:13px; margin-top:8px; }
-  .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-1px; margin-right:6px; }
-  .ask { display:grid; grid-template-columns:auto 1fr; gap:22px; align-items:start; }
-  #askBtn { font-size:22px; padding:22px 30px; border-radius:16px; }
-  #recap { font-size:22px; line-height:1.45; min-height:66px; }
-  #recap.muted { color:var(--muted); font-size:18px; }
-  #recapMeta { color:var(--muted); font-size:13px; margin-top:8px; }
-  #transcript { max-height:260px; overflow-y:auto; display:grid; gap:6px; }
-  .line { display:grid; grid-template-columns:64px 1fr; gap:12px; color:#c9ced8; }
-  .line .t { color:var(--muted); font-variant-numeric:tabular-nums; }
-  .line.missed { color:#fff; } .line.missed .t { color:var(--red); }
-  .keys { color:var(--muted); font-size:13px; }
-  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:0 6px; font-size:12px; }
-  .empty { color:var(--muted); }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--gutter); }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+  nav { position: sticky; top: 0; z-index: 5; background: rgba(243, 242, 238, 0.86);
+        backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 16px; height: 58px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.2px; }
+  .brand svg { display: block; }
+  .clock { font: 500 12.5px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .pulse.live { background: var(--ok); animation: ping 2s infinite; }
+  .pulse.bad { background: var(--signal); }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(44,122,75,.5); } 70%, 100% { box-shadow: 0 0 0 7px rgba(44,122,75,0); } }
+  .grow { flex: 1; }
+  .btn { border: 1px solid var(--line-2); background: var(--surface); border-radius: 999px; padding: 8px 15px;
+         font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+  .btn:hover { border-color: var(--ink-2); }
+  .btn.dark { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+  .btn.dark:hover { background: #2a2825; }
+  .btn.signal { background: var(--signal); border-color: var(--signal); color: #fff; }
+  .btn[hidden] { display: none; }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  .hero { padding: clamp(36px, 7vw, 72px) 0 28px; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; }
+  .state { font-size: clamp(56px, 10vw, 112px); line-height: .92; letter-spacing: -0.058em; font-weight: 500; margin: 0;
+           transition: color .3s var(--ease); }
+  .state.away { color: var(--signal); }
+  .why { margin: 16px 0 0; font-size: 17px; color: var(--ink-2); min-height: 26px; max-width: 60ch; }
+  .tally { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 28px; text-align: right; }
+  .tally b { display: block; font: 500 26px var(--sans); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .tally span { font: 400 12px var(--mono); color: var(--muted); }
+  .manual { margin-top: 18px; display: flex; gap: 10px; align-items: center; font: 12px var(--mono); color: var(--muted); }
+  .manual .btn { font-family: var(--sans); }
+  .head small.topics { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  kbd { font: 500 11px var(--mono); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; color: var(--ink-2); background: var(--surface); }
+
+  .section { border-top: 1px solid var(--line); padding: 26px 0 30px; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .head h2 { font-size: 15px; font-weight: 500; margin: 0; letter-spacing: -0.1px; }
+  .head small { font: 12px var(--mono); color: var(--muted); text-align: right; }
+  .track { position: relative; height: 76px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+           overflow: hidden; box-shadow: var(--shadow);
+           background-image: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), var(--line) calc(10% - 1px) 10%); }
+  .seg { position: absolute; top: 10px; bottom: 10px; background: var(--signal); border-radius: 4px; cursor: pointer; min-width: 5px;
+         border: 0; padding: 0; transition: filter .15s; }
+  .seg:hover { filter: brightness(1.08); }
+  .seg.open { background: var(--signal-bg); border: 1.5px dashed var(--signal); }
+  .seg.pending { background: repeating-linear-gradient(135deg, var(--signal) 0 6px, #ec7a52 6px 12px); }
+  .seg.selected { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+  .seg .lbl { position: absolute; left: 8px; right: 6px; top: 50%; transform: translateY(-50%); color: #fff; text-align: left;
+              font: 500 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+  .seg.open .lbl { color: var(--signal-ink); }
+  .now { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--ink); }
+  .now::after { content: ""; position: absolute; top: -1px; left: -3px; width: 7.5px; height: 7.5px; background: var(--ink); border-radius: 50%; }
+  .ruler { position: relative; height: 22px; margin-top: 8px; font: 11.5px var(--mono); color: var(--muted); }
+  .ruler span { position: absolute; transform: translateX(-50%); }
+  .ruler span:first-child { transform: none; }
+  .empty-track { position: absolute; inset: 0; display: grid; place-items: center; font: 12.5px var(--mono); color: var(--faint); }
+
+  .catch { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: clamp(20px, 4vw, 48px); }
+  .ask-col { display: flex; flex-direction: column; gap: 12px; }
+  .big { font-size: 20px; padding: 18px 22px; border-radius: 14px; font-weight: 500; letter-spacing: -0.2px; text-align: left;
+         display: flex; justify-content: space-between; align-items: center; }
+  .big kbd { background: #2a2825; color: var(--faint); border-color: var(--ink-2); }
+  .askbox { display: flex; gap: 6px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 5px 5px 5px 14px; }
+  .askbox input { flex: 1; border: 0; background: transparent; outline: none; font-size: 15px; min-width: 0; }
+  .askbox input::placeholder { color: var(--faint); }
+  .hint { font: 12px var(--mono); color: var(--muted); line-height: 1.8; }
+  .recap { font-size: clamp(20px, 2.2vw, 26px); line-height: 1.4; letter-spacing: -0.015em; margin: 0; max-width: 46ch; }
+  .recap.idle { color: var(--muted); }
+  .meta { font: 12px var(--mono); color: var(--muted); margin-top: 12px; }
+  .thread { margin-top: 22px; display: grid; gap: 16px; }
+  .qa { border-left: 2px solid var(--line-2); padding-left: 14px; }
+  .qa .q { font: 500 13px var(--mono); color: var(--muted); }
+  .qa .a { font-size: 16.5px; color: var(--ink-2); margin-top: 4px; max-width: 60ch; }
+
+  .lines { max-height: 300px; overflow-y: auto; display: grid; gap: 2px; }
+  .line { display: grid; grid-template-columns: 58px 1fr; gap: 14px; padding: 5px 10px; border-radius: var(--r-sm); color: var(--ink-2); }
+  .line .t { font: 12.5px/1.9 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+  .line.missed { background: var(--signal-bg); color: var(--ink); box-shadow: inset 2px 0 0 var(--signal); }
+  .line.missed .t { color: var(--signal-ink); }
+  .none { color: var(--muted); font-size: 15px; padding: 6px 0; }
+
+  #report[hidden], #live[hidden] { display: none; }
+  .r-hero { padding: clamp(40px, 7vw, 76px) 0 30px; }
+  .r-title { font-size: clamp(40px, 6.4vw, 76px); line-height: 1; letter-spacing: -0.05em; font-weight: 500; margin: 0; max-width: 16ch; }
+  .r-title .of { color: var(--muted); }
+  .r-sub { font-size: 19px; color: var(--ink-2); margin: 18px 0 0; max-width: 58ch; }
+  .figs { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); }
+  .fig { padding: 18px 20px; border-left: 1px solid var(--line); }
+  .fig:first-child { border-left: 0; }
+  .fig b { display: block; font: 500 34px var(--sans); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+  .fig span { font: 12px var(--mono); color: var(--muted); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(20px, 4vw, 56px); }
+  .bars { display: grid; gap: 12px; }
+  .bar .row { display: flex; justify-content: space-between; font-size: 15px; margin-bottom: 5px; }
+  .bar .row span:last-child { font: 12.5px var(--mono); color: var(--muted); }
+  .bar .fill { height: 8px; border-radius: 4px; background: var(--bg-2); overflow: hidden; }
+  .bar .fill i { display: block; height: 100%; background: var(--signal); border-radius: 4px; }
+  ul.list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  ul.list li { padding-left: 18px; position: relative; color: var(--ink-2); max-width: 60ch; }
+  ul.list li::before { content: ""; position: absolute; left: 0; top: .75em; width: 7px; height: 1.5px; background: var(--signal); }
+  ol.tips { padding: 0; margin: 0; list-style: none; counter-reset: t; display: grid; gap: 12px; }
+  ol.tips li { counter-increment: t; display: grid; grid-template-columns: 28px 1fr; max-width: 64ch; }
+  ol.tips li::before { content: counter(t); font: 500 13px/1.75 var(--mono); color: var(--signal-ink); }
+  .missed-list { display: grid; }
+  .m-item { display: grid; grid-template-columns: 160px 1fr; gap: 18px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .m-item:first-child { border-top: 0; }
+  .m-when { font: 12.5px/1.7 var(--mono); color: var(--muted); }
+  .m-when b { display: block; color: var(--ink); font-weight: 500; }
+  .m-text { color: var(--ink-2); }
+  .spark { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
+  .spark div { flex: 0 0 22px; background: var(--bg-2); border-radius: 3px 3px 0 0; }
+  .spark div.cur { background: var(--signal); }
+  .r-actions { display: flex; gap: 10px; flex-wrap: wrap; padding: 6px 0 60px; align-items: center; }
+  .by { font: 12px var(--mono); color: var(--muted); }
+  .loading { padding: 120px 0; text-align: center; color: var(--muted); font: 14px var(--mono); }
+
+  @media (max-width: 820px) {
+    .hero, .catch, .cols { grid-template-columns: 1fr; }
+    .tally { text-align: left; }
+    .figs { grid-template-columns: repeat(2, 1fr); }
+    .fig:nth-child(3) { border-left: 0; }
+    .fig:nth-child(n+3) { border-top: 1px solid var(--line); }
+    .m-item { grid-template-columns: 1fr; gap: 4px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Ketchup</h1>
-  <span class="tag">Ketchup on what you missed.</span>
-  <div class="spacer"></div>
-  <div class="status"><span id="dot" class="dot"></span><span id="conn">connecting…</span></div>
-  <button id="startBtn">Start session</button>
-</header>
-
-<main>
-  <section class="panel">
-    <div class="row" style="justify-content:space-between; margin-bottom:14px;">
-      <div>
-        <div class="label">Student</div>
-        <div id="focus" class="here">Focused</div>
-        <div id="why"></div>
-      </div>
-      <div class="row">
-        <span class="keys"><kbd>D</kbd> zoned out / back</span>
-        <button id="driftBtn" class="drift">I zoned out</button>
-      </div>
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="none" stroke="#161513" stroke-width="1.5"/><path d="M10 1a9 9 0 0 1 0 18z" fill="#e2501d"/></svg>
+      Ketchup
     </div>
-    <div class="label">Lecture timeline</div>
-    <div id="track" class="track"></div>
-    <div id="ticks" class="ticks"></div>
-    <div class="legend">
-      <span><span class="sw" style="background:var(--red-soft)"></span>zoning out now</span>
-      <span><span class="sw" style="background:var(--amber)"></span>writing recap</span>
-      <span><span class="sw" style="background:var(--red)"></span>recap ready, click to replay</span>
+    <div class="clock"><span id="pulse" class="pulse"></span><span id="clock">connecting</span></div>
+    <div class="grow"></div>
+    <button id="endBtn" class="btn" hidden>End session</button>
+    <button id="startBtn" class="btn dark">Start session</button>
+  </div>
+</nav>
+
+<main id="live" class="wrap">
+  <section class="hero">
+    <div>
+      <h1 id="state" class="state">Ready.</h1>
+      <p id="why" class="why">Start a session, then teach the camera where the lecture is.</p>
+      <div class="manual"><button id="driftBtn" class="btn">Mark zoned out</button><span><kbd>D</kbd> also works</span></div>
+    </div>
+    <div class="tally" aria-live="polite">
+      <div><b id="tMissed">0:00</b><span>missed</span></div>
+      <div><b id="tCount">0</b><span>drifts</span></div>
+      <div><b id="tPct">0%</b><span>of class</span></div>
     </div>
   </section>
 
-  <section class="panel ask">
-    <div>
-      <button id="askBtn" class="primary">What did I miss?</button>
-      <div class="row" style="margin-top:12px;">
-        <button id="micBtn">Ask out loud</button>
-      </div>
-      <div class="keys" style="margin-top:10px;"><kbd>Space</kbd> ask &nbsp; <kbd>V</kbd> ask out loud</div>
+  <section class="section">
+    <div class="head"><h2>Lecture</h2><small>orange is where you zoned out. Click one to replay it.</small></div>
+    <div id="track" class="track"><div class="empty-track">The timeline fills in once a session starts</div></div>
+    <div id="ruler" class="ruler"></div>
+  </section>
+
+  <section class="section catch">
+    <div class="ask-col">
+      <button id="askBtn" class="btn dark big">What did I miss? <kbd>Space</kbd></button>
+      <form id="askForm" class="askbox" autocomplete="off">
+        <input id="askInput" placeholder="Ask about the part you missed" aria-label="Ask about the part you missed">
+        <button class="btn" type="submit">Ask</button>
+      </form>
+      <button id="micBtn" class="btn" type="button">Ask out loud</button>
+      <div class="hint"><kbd>V</kbd> to speak a question. Answers come from the lecture transcript.</div>
     </div>
     <div>
-      <div class="label">Recap</div>
-      <div id="recap" class="muted">Zone out, come back, and ask. Your recap shows up here.</div>
-      <div id="recapMeta"></div>
+      <p id="recap" class="recap idle">When you come back from zoning out, ask what you missed. The recap shows up here and is read aloud.</p>
+      <div id="meta" class="meta"></div>
+      <div id="thread" class="thread"></div>
     </div>
   </section>
 
-  <section class="panel">
-    <div class="label">Live transcript</div>
-    <div id="transcript"><div class="empty">No transcript yet. Start the audio script.</div></div>
+  <section class="section">
+    <div class="head"><h2>Transcript</h2><small>highlighted lines were said while you were away</small></div>
+    <div id="lines" class="lines"><div class="none">Nothing yet. Start the band to see the lecture here.</div></div>
   </section>
 </main>
+
+<main id="report" class="wrap" hidden></main>
 
 <script>
 const params = new URLSearchParams(location.search);
 const API = (params.get("api") || location.origin).replace(/\/$/, "");
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
 
-let state = null, selected = null, myDrift = null, asking = false, lastLineCount = 0;
+let state = null, selected = null, myDrift = null, busy = false, lastLines = -1, openIds = null, report = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...opts });
-  if (!r.ok) { const e = new Error(path + " -> " + r.status); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(path + " returned " + r.status); e.status = r.status; throw e; }
   return r.json();
 }
 const post = (path, body = {}) => api(path, { method: "POST", body: JSON.stringify(body) });
-const fmt = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
 
-// ---------------------------------------------------------------- polling + rendering
+// ---------------------------------------------------------------- beep when a drift starts
+let actx = null;
+function beep() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const t = actx.currentTime;
+    [0, 0.16].forEach((dt, i) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = "sine"; o.frequency.value = i ? 660 : 880;
+      g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(0.25, t + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.14);
+      o.connect(g).connect(actx.destination); o.start(t + dt); o.stop(t + dt + 0.15);
+    });
+  } catch {}
+}
+document.addEventListener("pointerdown", () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {} }, { once: true });
+
+// ---------------------------------------------------------------- polling
 async function poll() {
   try {
     state = await api("/state");
-    $("dot").className = "dot ok";
-    $("conn").textContent = state.start_time ? "live" : "no session: press Start";
+    $("pulse").className = "pulse " + (state.start_time && !state.ended_at ? "live" : "");
+    if (!state.start_time) $("clock").textContent = "no session";
+    else if (state.ended_at) $("clock").textContent = "ended at " + fmt(state.ended_at - state.start_time);
+    else $("clock").textContent = "live " + fmt(state.now - state.start_time);
+    $("startBtn").textContent = state.start_time ? "New session" : "Start session";
+    $("endBtn").hidden = !state.start_time || !!state.ended_at;
+    if (state.ended_at && !report && $("report").hidden) loadReport();
     render();
   } catch (e) {
-    $("dot").className = "dot bad";
-    $("conn").textContent = "backend unreachable";
+    $("pulse").className = "pulse bad"; $("clock").textContent = "backend unreachable";
   }
 }
 
 function render() {
   const s = state;
-  if (!s || !s.start_time) {
-    $("track").innerHTML = ""; $("ticks").innerHTML = "";
-    return;
-  }
+  if (!s || !s.start_time) return;
   const t0 = s.start_time, now = s.now;
-  const span = Math.max(60, (now - t0) * 1.05);
+  const span = Math.max(60, (now - t0) * 1.04);
   const pct = (t) => Math.min(100, Math.max(0, ((t - t0) / span) * 100));
 
-  const open = s.drifts.some((d) => d.status === "open");
-  $("focus").textContent = open ? "Zoned out" : "Focused";
-  $("focus").className = open ? "away" : "here";
-  const cur = s.drifts.filter((d) => d.status === "open").pop();
-  $("why").textContent = cur && cur.detail ? cur.detail : "";
+  const opened = s.drifts.filter((d) => d.status === "open");
+  if (openIds) for (const d of opened) if (!openIds.has(d.drift_id)) beep();
+  openIds = new Set(opened.map((d) => d.drift_id));
+
+  const cur = opened[opened.length - 1];
+  $("state").textContent = s.ended_at ? "Done." : cur ? "Zoned out." : "Focused.";
+  $("state").className = "state" + (cur ? " away" : "");
+  $("why").textContent = s.ended_at ? "Session ended. Your report is ready." :
+    cur ? (cur.detail || "Ketchup is holding on to what the lecturer says.") :
+    s.drifts.length ? "Ask what you missed whenever you're back." : "Ketchup is listening along with you.";
+
   const mine = myDrift && s.drifts.find((d) => d.drift_id === myDrift);
   if (myDrift && (!mine || mine.status !== "open")) myDrift = null;
-  $("driftBtn").classList.toggle("on", !!myDrift);
-  $("driftBtn").textContent = myDrift ? "I'm back" : "I zoned out";
+  $("driftBtn").textContent = myDrift ? "I'm back" : "Mark zoned out";
+  $("driftBtn").classList.toggle("signal", !!myDrift);
+
+  let missed = 0;
+  for (const d of s.drifts) missed += Math.max(0, (d.end ?? now) - Math.max(d.start, t0));
+  $("tMissed").textContent = fmt(missed);
+  $("tCount").textContent = s.drifts.length;
+  $("tPct").textContent = Math.round((100 * missed) / Math.max(1, now - t0)) + "%";
 
   const track = $("track");
   track.innerHTML = "";
   for (const d of s.drifts) {
     const end = d.end ?? now;
-    const el = document.createElement("div");
-    el.className = "seg " + d.status + (selected === d.drift_id ? " selected" : "");
-    el.style.left = pct(d.start) + "%";
-    el.style.width = Math.max(0.4, pct(end) - pct(d.start)) + "%";
-    el.title = `${fmt(d.start - t0)}–${fmt(end - t0)} (${d.status})` + (d.detail ? `\n${d.detail}` : "");
-    if (d.detail) { const w = document.createElement("span"); w.className = "why"; w.textContent = d.detail; el.appendChild(w); }
-    el.onclick = () => showRecap(d.drift_id, true);
-    track.appendChild(el);
+    const b = document.createElement("button");
+    b.className = "seg " + d.status + (selected === d.drift_id ? " selected" : "");
+    b.style.left = pct(d.start) + "%";
+    b.style.width = Math.max(0.5, pct(end) - pct(d.start)) + "%";
+    b.title = `${fmt(d.start - t0)} to ${fmt(end - t0)}` + (d.detail ? `: ${d.detail}` : "");
+    b.setAttribute("aria-label", "Drift at " + fmt(d.start - t0) + (d.detail ? ", " + d.detail : ""));
+    b.onclick = () => showRecap(d.drift_id, true);
+    const l = document.createElement("span"); l.className = "lbl";
+    l.textContent = d.detail || (d.status === "pending" ? "writing recap" : fmt(d.start - t0));
+    b.appendChild(l); track.appendChild(b);
   }
-  const nowEl = document.createElement("div");
-  nowEl.className = "now"; nowEl.style.left = pct(now) + "%";
-  track.appendChild(nowEl);
+  const n = document.createElement("div"); n.className = "now"; n.style.left = pct(now) + "%"; track.appendChild(n);
 
-  const step = span > 600 ? 120 : span > 240 ? 60 : 30;
-  $("ticks").innerHTML = "";
-  for (let x = 0; x <= span; x += step) {
-    const sp = document.createElement("span");
-    sp.style.left = (x / span) * 100 + "%"; sp.textContent = fmt(x);
-    $("ticks").appendChild(sp);
+  const step = span > 1200 ? 300 : span > 600 ? 120 : span > 240 ? 60 : 15;
+  $("ruler").innerHTML = "";
+  for (let x = 0; x <= span - step * 0.4; x += step) {
+    const sp = document.createElement("span"); sp.style.left = (x / span) * 100 + "%"; sp.textContent = fmt(x);
+    $("ruler").appendChild(sp);
   }
 
-  const box = $("transcript");
-  if (!s.transcript.length) {
-    box.innerHTML = '<div class="empty">No transcript yet. Start the audio script.</div>';
-  } else if (s.transcript.length !== lastLineCount) {
+  const box = $("lines");
+  if (s.transcript.length !== lastLines) {
     const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
-    box.innerHTML = "";
-    for (const l of s.transcript.slice(-40)) {
-      const missed = s.drifts.some((d) => l.end >= d.start && l.start <= (d.end ?? now));
-      const row = document.createElement("div");
-      row.className = "line" + (missed ? " missed" : "");
-      const t = document.createElement("span"); t.className = "t"; t.textContent = fmt(l.start - t0);
-      const tx = document.createElement("span"); tx.textContent = l.text;
-      row.append(t, tx); box.appendChild(row);
+    box.innerHTML = s.transcript.length ? "" : '<div class="none">Nothing yet. Start the band to see the lecture here.</div>';
+    for (const l of s.transcript.slice(-60)) {
+      const miss = s.drifts.some((d) => l.end >= d.start && l.start <= (d.end ?? now));
+      const row = document.createElement("div"); row.className = "line" + (miss ? " missed" : "");
+      row.innerHTML = `<span class="t">${fmt(l.start - t0)}</span><span>${esc(l.text)}</span>`;
+      box.appendChild(row);
     }
-    if (atBottom || lastLineCount === 0) box.scrollTop = box.scrollHeight;
-    lastLineCount = s.transcript.length;
+    if (atBottom || lastLines <= 0) box.scrollTop = box.scrollHeight;
+    lastLines = s.transcript.length;
   }
 }
 
-// ---------------------------------------------------------------- actions
+// ---------------------------------------------------------------- session actions
 async function startSession() {
   try {
     await post("/session/start");
-    myDrift = null; selected = null; lastLineCount = 0;
-    setRecap("Session started. Zone out, come back, and ask.", "", true);
-    poll();
-  } catch (e) { setRecap("Could not start a session: " + e.message, "", true); }
+    myDrift = null; selected = null; lastLines = -1; report = null; openIds = null;
+    $("report").hidden = true; $("live").hidden = false; $("thread").innerHTML = "";
+    setRecap("When you come back from zoning out, ask what you missed. The recap shows up here and is read aloud.", "", true);
+    window.scrollTo({ top: 0 }); poll();
+  } catch (e) { setRecap("Couldn't start a session: " + e.message, "", true); }
+}
+
+async function endSession() {
+  $("endBtn").disabled = true;
+  $("live").hidden = true; $("report").hidden = false;
+  $("report").innerHTML = '<div class="loading">Finishing your last recaps and writing your report…</div>';
+  window.scrollTo({ top: 0 });
+  try { report = await post("/session/end"); renderReport(); }
+  catch (e) { $("report").innerHTML = `<div class="loading">Couldn't build the report (${esc(e.message)}). <button class="btn" onclick="endSession()">Try again</button></div>`; }
+  finally { $("endBtn").disabled = false; poll(); }
+}
+
+async function loadReport() {
+  try { report = await api("/session/summary"); $("live").hidden = true; $("report").hidden = false; renderReport(); } catch {}
 }
 
 async function toggleDrift() {
   try {
-    if (!myDrift) {
-      const r = await post("/drift/start", { start: Date.now() / 1000 });
-      myDrift = r.drift_id;
-    } else {
-      await post("/drift/end", { drift_id: myDrift, end: Date.now() / 1000 });
-      myDrift = null;
-    }
+    if (!myDrift) myDrift = (await post("/drift/start", { start: Date.now() / 1000, cause: "manual", detail: "Marked by hand" })).drift_id;
+    else { await post("/drift/end", { drift_id: myDrift, end: Date.now() / 1000 }); myDrift = null; }
     poll();
-  } catch (e) {
-    setRecap(e.status === 409 ? "Press Start session first." : "Drift failed: " + e.message, "", true);
-  }
+  } catch (e) { setRecap(e.status === 409 ? "Start a session first." : "That didn't go through: " + e.message, "", true); }
 }
 
-function setRecap(text, meta = "", muted = false) {
-  $("recap").textContent = text;
-  $("recap").className = muted ? "muted" : "";
-  $("recapMeta").textContent = meta;
-}
+// ---------------------------------------------------------------- recaps, questions, voice
+function setRecap(text, meta = "", idle = false) { $("recap").textContent = text; $("recap").className = "recap" + (idle ? " idle" : ""); $("meta").textContent = meta; }
 
-async function ask() {
-  if (asking) return;
-  asking = true;
+async function askMissed() {
+  if (busy) return; busy = true;
   try {
     let r = await api("/recap/latest");
-    if (r.status === "none") {
-      const msg = "Looks like you haven't missed anything.";
-      setRecap(msg); speakBrowser(msg); return;
-    }
+    if (r.status === "none") { const m = "Looks like you haven't missed anything."; setRecap(m); speak(m); return; }
     if (r.status === "pending") {
-      setRecap("Give me a second, I'm writing your recap…", "", true);
+      setRecap("One second, writing your recap…", "", true);
       const until = Date.now() + 15000;
-      while (r.status === "pending" && Date.now() < until) {
-        await new Promise((ok) => setTimeout(ok, 500));
-        r = await api("/recap/latest");
-      }
+      while (r.status === "pending" && Date.now() < until) { await new Promise((ok) => setTimeout(ok, 500)); r = await api("/recap/latest"); }
     }
-    if (r.status === "ready") await showRecap(r.drift_id, true);
-    else setRecap("Still writing the recap. Ask again in a moment.", "", true);
-  } catch (e) {
-    setRecap("Couldn't reach the backend: " + e.message, "", true);
-  } finally { asking = false; }
+    if (r.status === "ready") await showRecap(r.drift_id, true); else setRecap("Still writing. Ask again in a moment.", "", true);
+  } catch (e) { setRecap("Couldn't reach the backend: " + e.message, "", true); }
+  finally { busy = false; }
 }
 
-async function showRecap(driftId, speak) {
-  const rec = state && state.recaps.find((r) => r.drift_id === driftId);
-  let text = rec && rec.text;
-  if (!text) {
-    try { const r = await api("/recap/latest"); if (r.drift_id === driftId) text = r.text; } catch {}
-  }
-  if (!text) { setRecap("That recap is still being written…", "", true); return; }
-  selected = driftId; render();
-  const d = state && state.drifts.find((x) => x.drift_id === driftId);
-  let meta = d && state.start_time ? `Missed ${fmt(d.start - state.start_time)}–${fmt((d.end ?? state.now) - state.start_time)}` : "";
-  if (d && d.detail) meta += `  ·  ${d.detail}`;
-  setRecap(text, meta);
-  if (speak) await playRecap(driftId, text);
+async function showRecap(id, play) {
+  let rec = state && state.recaps.find((r) => r.drift_id === id);
+  if (!rec) { try { const r = await api("/recap/latest"); if (r.drift_id === id && r.text) rec = r; } catch {} }
+  if (!rec) { setRecap("That recap is still being written…", "", true); return; }
+  selected = id; render();
+  const d = state.drifts.find((x) => x.drift_id === id), t0 = state.start_time;
+  setRecap(rec.text, d ? `missed ${fmt(d.start - t0)} to ${fmt((d.end ?? state.now) - t0)}` + (d.detail ? `, ${d.detail}` : "") : "");
+  if (play) playUrl(`${API}/recap/${id}/audio`, rec.text);
 }
 
-let currentAudio = null;
-async function playRecap(driftId, text) {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  speechSynthesis.cancel();
+async function askQuestion(q) {
+  q = q.trim(); if (!q) return;
+  const item = document.createElement("div"); item.className = "qa";
+  item.innerHTML = `<div class="q">${esc(q)}</div><div class="a">Thinking…</div>`;
+  $("thread").prepend(item);
   try {
-    const r = await fetch(`${API}/recap/${driftId}/audio`);
-    if (!r.ok) throw new Error("tts " + r.status);
-    const url = URL.createObjectURL(await r.blob());
-    currentAudio = new Audio(url);
-    await currentAudio.play();
-    $("recapMeta").textContent += "  ·  voice: ElevenLabs";
-  } catch (e) {
-    speakBrowser(text);   // fallback so the demo always talks
-    $("recapMeta").textContent += "  ·  voice: browser fallback";
-  }
+    const r = await post("/ask", { question: q, drift_id: selected });
+    item.querySelector(".a").textContent = r.answer;
+    speakText(r.answer);
+  } catch (e) { item.querySelector(".a").textContent = e.status === 409 ? "Start a session first." : "Couldn't get an answer: " + e.message; }
 }
 
-function speakBrowser(text) {
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.03; speechSynthesis.speak(u);
+let audio = null;
+function stopAudio() { if (audio) { audio.pause(); audio = null; } speechSynthesis.cancel(); }
+async function playUrl(url, text, opts, note = true) {
+  stopAudio();
+  try {
+    const r = await fetch(url, opts); if (!r.ok) throw 0;
+    audio = new Audio(URL.createObjectURL(await r.blob())); await audio.play();
+    if (note) $("meta").textContent += "  (voice by ElevenLabs)";
+  } catch { speak(text); if (note) $("meta").textContent += "  (browser voice)"; }
 }
+function speakText(text) {
+  playUrl(`${API}/speak`, text, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) }, false);
+}
+function speak(text) { const u = new SpeechSynthesisUtterance(text); u.rate = 1.03; speechSynthesis.speak(u); }
 
-// ---------------------------------------------------------------- ask out loud (browser speech recognition)
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let listening = false;
 function listen() {
-  if (!SR) { setRecap("Voice questions need Chrome. Use the button or Space.", "", true); return; }
+  if (!SR) { setRecap("Speaking a question needs Chrome. Type it instead.", "", true); return; }
   if (listening) return;
-  const rec = new SR();
-  rec.lang = "en-US"; rec.interimResults = false; rec.maxAlternatives = 1;
-  listening = true; $("micBtn").textContent = "Listening…"; $("micBtn").classList.add("primary");
+  const rec = new SR(); rec.lang = "en-US"; rec.interimResults = false;
+  listening = true; $("micBtn").textContent = "Listening…"; $("micBtn").classList.add("dark");
   rec.onresult = (e) => {
     const said = e.results[0][0].transcript;
-    $("recapMeta").textContent = `Heard: "${said}"`;
-    if (/miss|catch me up|what happened|recap|what did (he|she|they) say/i.test(said)) ask();
-    else setRecap(`Heard "${said}". Try "What did I miss?"`, "", true);
+    if (/^(what did i miss|catch me up|what happened|recap)\b/i.test(said.trim())) askMissed(); else askQuestion(said);
   };
-  rec.onerror = (e) => setRecap("Mic error: " + e.error + ". Use the button instead.", "", true);
-  rec.onend = () => { listening = false; $("micBtn").textContent = "Ask out loud"; $("micBtn").classList.remove("primary"); };
+  rec.onerror = (e) => setRecap("Microphone problem (" + e.error + "). Type your question instead.", "", true);
+  rec.onend = () => { listening = false; $("micBtn").textContent = "Ask out loud"; $("micBtn").classList.remove("dark"); };
   rec.start();
+}
+
+// ---------------------------------------------------------------- report
+function renderReport() {
+  const st = report.stats, an = report.analysis;
+  const maxSec = Math.max(1, ...st.causes.map((c) => c.seconds));
+  const hist = [...(report.history || []), { date: "today", percent: st.percent, cur: true }];
+  const maxP = Math.max(10, ...hist.map((h) => h.percent));
+  $("report").innerHTML = `
+    <section class="r-hero">
+      <h1 class="r-title">You missed ${fmt(st.missed)} <span class="of">of ${fmt(st.duration)}.</span></h1>
+      <p class="r-sub">${esc(an.headline)}</p>
+    </section>
+    <div class="figs">
+      <div class="fig"><b>${Math.round(st.percent)}%</b><span>of class missed</span></div>
+      <div class="fig"><b>${st.count}</b><span>times you drifted</span></div>
+      <div class="fig"><b>${fmt(st.longest)}</b><span>longest drift</span></div>
+      <div class="fig"><b>${fmt(st.average)}</b><span>average drift</span></div>
+    </div>
+    <section class="section cols" style="margin-top:34px">
+      <div>
+        <div class="head"><h2>Why you drifted</h2></div>
+        <div class="bars">${st.causes.length ? st.causes.map((c) => `
+          <div class="bar"><div class="row"><span>${esc(c.label)}</span><span>${c.count}× for ${fmt(c.seconds)}</span></div>
+          <div class="fill"><i style="width:${(100 * c.seconds) / maxSec}%"></i></div></div>`).join("") : '<div class="none">No drifts. Great session.</div>'}</div>
+      </div>
+      <div>
+        <div class="head"><h2>Your patterns</h2></div>
+        <ul class="list">${an.patterns.map((p) => `<li>${esc(p)}</li>`).join("") || '<li>Not enough data yet.</li>'}</ul>
+      </div>
+    </section>
+    <section class="section">
+      <div class="head"><h2>What you missed</h2><small class="topics" title="${esc(an.missed_topics.join(", "))}">${an.missed_topics.map(esc).join(", ")}</small></div>
+      <div class="missed-list">${st.drifts.map((d) => `
+        <div class="m-item"><div class="m-when"><b>${fmt(d.at)} to ${fmt(d.at + d.length)}</b>${esc(d.detail || d.label)}</div>
+        <div class="m-text">${esc(d.recap || "No recap for this one.")}</div></div>`).join("") || '<div class="none">Nothing. You stayed with it the whole time.</div>'}</div>
+    </section>
+    <section class="section cols">
+      <div>
+        <div class="head"><h2>Try this next class</h2></div>
+        <ol class="tips">${an.tips.map((t) => `<li><span>${esc(t)}</span></li>`).join("")}</ol>
+      </div>
+      <div>
+        <div class="head"><h2>Compared with earlier sessions</h2><small>share of class missed</small></div>
+        <div class="spark">${hist.map((h) => `<div class="${h.cur ? "cur" : ""}" style="height:${Math.max(4, (64 * h.percent) / maxP)}px" title="${esc(h.date)}: ${h.percent}%"></div>`).join("")}</div>
+        <div class="by" style="margin-top:8px">${hist.length > 1 ? `${hist.length - 1} earlier session(s). Today: ${Math.round(st.percent)}%` : "Your first session. Future reports will compare."}</div>
+      </div>
+    </section>
+    <div class="r-actions">
+      <button class="btn dark" onclick="downloadNotes()">Download notes</button>
+      <button class="btn" onclick="startSession()">Start a new session</button>
+      <span class="by">${report.generated_by === "gemini" ? "Analysis by Gemini 4" : "Gemini unavailable, showing a basic analysis"}</span>
+    </div>`;
+}
+
+function downloadNotes() {
+  const st = report.stats, an = report.analysis, t0 = state.start_time;
+  const date = new Date(t0 * 1000).toLocaleString();
+  let md = `# Ketchup notes, ${date}\n\nYou missed **${fmt(st.missed)}** of ${fmt(st.duration)} (${Math.round(st.percent)}%), across ${st.count} drift(s).\n\n${an.headline}\n\n## What you missed\n\n`;
+  for (const d of st.drifts) md += `### ${fmt(d.at)} to ${fmt(d.at + d.length)}${d.detail ? ` (${d.detail})` : ""}\n\n${d.recap || "No recap."}\n\n`;
+  if (!st.drifts.length) md += "Nothing, you stayed with it.\n\n";
+  md += `## Why you drifted\n\n${st.causes.map((c) => `- ${c.label}: ${c.count}×, ${fmt(c.seconds)}`).join("\n") || "- No drifts"}\n\n`;
+  md += `## Patterns\n\n${an.patterns.map((p) => "- " + p).join("\n")}\n\n## Try this next class\n\n${an.tips.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\n`;
+  md += `## Full transcript\n\n`;
+  for (const l of state.transcript) {
+    const miss = st.drifts.some((d) => l.end - t0 >= d.at && l.start - t0 <= d.at + d.length);
+    md += `- \`${fmt(l.start - t0)}\` ${miss ? "**[missed]** " : ""}${l.text}\n`;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+  a.download = `ketchup-notes-${new Date(t0 * 1000).toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`;
+  a.click();
 }
 
 // ---------------------------------------------------------------- wiring
 $("startBtn").onclick = startSession;
+$("endBtn").onclick = endSession;
 $("driftBtn").onclick = toggleDrift;
-$("askBtn").onclick = ask;
+$("askBtn").onclick = askMissed;
 $("micBtn").onclick = listen;
+$("askForm").onsubmit = (e) => { e.preventDefault(); askQuestion($("askInput").value); $("askInput").value = ""; };
 document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.repeat) return;
+  if (e.target.tagName === "INPUT" || e.repeat || e.metaKey || e.ctrlKey) return;
   if (e.key === "d" || e.key === "D") toggleDrift();
-  else if (e.key === " ") { e.preventDefault(); ask(); }
+  else if (e.key === " ") { e.preventDefault(); askMissed(); }
   else if (e.key === "v" || e.key === "V") listen();
 });
-poll();
-setInterval(poll, 1000);
+poll(); setInterval(poll, 1000);
 </script>
 </body>
 </html>
