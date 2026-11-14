@@ -25,8 +25,15 @@ Space is held, so the lecturer and the lecture mic never trigger it. The first r
 `GET $REWIND_API/recap/latest` -> `{"status": "none" | "pending" | "ready", "drift_id", "text"}`
 
 - ready: the text is spoken as written (this skips a second LLM call, about 1 s faster)
-- pending: poll every 0.5 s for up to 6 s; still pending -> "Give me a second", then try once more
+- pending: poll every 0.5 s for up to 6 s; still pending -> "Give me a second", then poll up to 10 s more;
+  still pending -> "I'm still writing your recap. Ask me again in a moment."
 - none: "Looks like you haven't missed anything."
+- a drift that is still open (`GET /focus` -> `{"focused": false}`) counts as pending. Right after you look
+  back, the camera only sends `/drift/end` about 5 s later, and until then `/recap/latest` would say
+  "none" or return an older recap.
+
+Timing on the real backend: the recap is ready about 8-9 s after `/drift/end` (RECAP_DELAY 6 s + Gemini),
+so about 13-14 s after you look back. Asking earlier is fine: the agent says "Give me a second" and waits.
 
 ## Measured (15:19, real mic, P3's backend over the tunnel)
 
