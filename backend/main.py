@@ -15,6 +15,7 @@ Contract (all times are Unix epoch seconds, floats):
   POST /session/end                                          -> report (stats + Gemini analysis)
   POST /ask             {question, drift_id?}                -> {answer}
   GET  /sessions, GET /sessions/{id}                          -> past sessions + their reports
+  POST /camera/start, /camera/stop                           -> launch/stop camera/drift.py from the page
   POST /camera/ping                                          -> camera heartbeat (shown on the page)
   GET  /focus                                                -> {focused: bool}  (false while a drift is open; P2 polls it)
 Every POST returns 409 if no session has started.
@@ -90,6 +91,8 @@ S = {
 
 _gemini = None
 CAMERA = {"t": 0.0}  # last heartbeat from the camera script (camera/drift.py)
+CAMERA_DIR = Path(os.getenv("CAMERA_DIR") or Path(__file__).resolve().parent.parent / "camera")
+CAMERA_PROC = {"p": None, "log": None}  # camera started from the page
 
 
 def gemini():
@@ -237,7 +240,7 @@ async def state():
         "start_time": S["start_time"],
         "now": S["ended_at"] or time.time(),
         "ended_at": S["ended_at"],
-        "camera": {**CAMERA, "connected": time.time() - CAMERA["t"] < 6},
+        "camera": {**CAMERA, "connected": time.time() - CAMERA["t"] < 6, **_camera_proc_state()},
         "drifts": sorted(S["drifts"].values(), key=lambda d: d["drift_id"]),
         "transcript": S["transcript"],
         "recaps": sorted(S["recaps"].values(), key=lambda r: r["drift_id"]),
@@ -624,3 +627,59 @@ async def sessions_get(sid: str):
         if h.get("id") == sid and "summary" in h:
             return h["summary"]
     raise HTTPException(status_code=404, detail="No saved report for that session")
+
+
+# ---------------------------------------------------------------- start/stop the camera from the page
+def _camera_proc_state():
+    p = CAMERA_PROC["p"]
+    if p is None:
+        return {"running": False, "error": None}
+    code = p.poll()
+    if code is None:
+        return {"running": True, "error": None}
+    err = None
+    if code not in (0, -2, 130):
+        try:
+            tail = (CAMERA_DIR / "camera.log").read_text(errors="replace").strip().splitlines()[-3:]
+            err = " / ".join(tail)[-300:] or f"exited with code {code}"
+        except Exception:  # noqa: BLE001
+            err = f"exited with code {code}"
+    return {"running": False, "error": err}
+
+
+@app.post("/camera/start")
+async def camera_start():
+    """Launch camera/drift.py on this laptop (its window opens here). Uses camera/.venv if present."""
+    import subprocess
+    import sys
+    if CAMERA_PROC["p"] is not None and CAMERA_PROC["p"].poll() is None:
+        return {"running": True}
+    script = CAMERA_DIR / "drift.py"
+    if not script.exists():
+        raise HTTPException(status_code=404, detail=f"Can't find {script}. Run the server from the Ketchup repo.")
+    venv_py = CAMERA_DIR / ".venv" / "bin" / "python"
+    py = str(venv_py) if venv_py.exists() else sys.executable
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    env.pop("REWIND_API", None)  # camera reads its own camera/.env (localhost:8001)
+    logf = open(CAMERA_DIR / "camera.log", "w")
+    CAMERA_PROC.update(p=subprocess.Popen([py, str(script)], cwd=str(CAMERA_DIR), env=env,
+                                          stdout=logf, stderr=subprocess.STDOUT), log=logf)
+    log.info("camera started (pid %s) with %s", CAMERA_PROC["p"].pid, py)
+    return {"running": True}
+
+
+@app.post("/camera/stop")
+async def camera_stop():
+    import signal
+    p = CAMERA_PROC["p"]
+    if p is None or p.poll() is not None:
+        return {"running": False}
+    p.send_signal(signal.SIGINT)  # drift.py ends any open drift on the way out
+    for _ in range(30):
+        if p.poll() is not None:
+            break
+        await asyncio.sleep(0.2)
+    if p.poll() is None:
+        p.kill()
+    CAMERA["t"] = 0.0
+    return {"running": False}

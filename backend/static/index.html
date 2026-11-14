@@ -164,6 +164,8 @@
   .cam.on .dot { background: var(--ok); }
   .cam.on.away .dot { background: var(--signal); }
   .cam b { color: var(--ink-2); font-weight: 500; }
+  .cam .btn { padding: 4px 12px; font: 500 12px var(--sans); }
+  .cam .err { color: var(--signal-ink); }
   .cam code { color: var(--ink-2); background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
 
   .past { padding-top: clamp(36px, 6vw, 64px); padding-bottom: 60px; }
@@ -230,7 +232,7 @@
       <h1 id="state" class="state">Ready.</h1>
       <p id="why" class="why">Start a session, then teach the camera where the lecture is.</p>
       <div class="manual"><button id="driftBtn" class="btn">Mark zoned out</button><span><kbd>D</kbd> also works</span></div>
-      <div id="cam" class="cam"><span class="dot"></span><span id="camText">Camera not connected. In a terminal: <code>cd camera && python3 drift.py</code></span></div>
+      <div id="cam" class="cam"><span class="dot"></span><span id="camText">Camera not connected</span><button id="camBtn" class="btn" type="button">Start camera</button></div>
     </div>
     <div class="tally" aria-live="polite">
       <div><b id="tMissed">0:00</b><span>missed</span></div>
@@ -338,12 +340,18 @@ async function poll() {
   }
 }
 
+let camStarting = 0;
 function renderCamera() {
   const c = state.camera || {};
   const away = /DRIFT|RETURN/i.test(c.state || "");
+  if (c.connected) camStarting = 0;
   $("cam").className = "cam" + (c.connected ? " on" : "") + (c.connected && away ? " away" : "");
+  $("camBtn").textContent = c.running || c.connected ? "Stop camera" : camStarting ? "Starting…" : "Start camera";
+  $("camBtn").disabled = !!camStarting && !c.connected;
+  if (camStarting && Date.now() - camStarting > 25000) camStarting = 0;
   if (!c.connected) {
-    $("camText").innerHTML = 'Camera not connected. In a terminal: <code>cd camera && python3 drift.py</code>';
+    $("camText").innerHTML = c.error ? `<span class="err">Camera stopped: ${esc(c.error)}</span>` :
+      camStarting || c.running ? "Opening the camera window… (allow camera access if macOS asks)" : "Camera not connected";
   } else {
     const match = c.match != null && c.thr != null ? ` · match ${c.match}/${c.thr}` : "";
     $("camText").innerHTML = `Camera connected · <b>${esc((c.state || "").toLowerCase())}</b>${c.why ? " · " + esc(c.why) : ""}${esc(match)}` +
@@ -702,6 +710,14 @@ function showMascot(r) {
 }
 
 // ---------------------------------------------------------------- wiring
+$("camBtn").onclick = async () => {
+  const c = (state && state.camera) || {};
+  try {
+    if (c.running || c.connected) { await post("/camera/stop"); }
+    else { camStarting = Date.now(); renderCamera(); await post("/camera/start"); }
+  } catch (e) { camStarting = 0; $("camText").innerHTML = `<span class="err">${esc(e.status === 404 ? "Can't find the camera code. Run the server from the Ketchup folder." : e.message)}</span>`; }
+  poll();
+};
 $("themeBtn").onclick = () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
 $("pastBtn").onclick = () => (view === "past" ? (report && state && state.ended_at ? show("report") : show("live")) : loadPast());
 $("startBtn").onclick = startSession;
