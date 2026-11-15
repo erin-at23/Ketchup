@@ -517,13 +517,25 @@ async function endSession() {
   $("endBtn").disabled = true;
   show("report");
   $("report").innerHTML = '<div class="loading">Finishing your last recaps and writing your report…</div>';
-  try { report = await post("/session/end"); renderReport(); showMascot(report); }
+  try { report = await post("/session/end"); renderReport(); showMascot(report); waitForAnalysis(); }
   catch (e) { $("report").innerHTML = `<div class="loading">Couldn't build the report (${esc(e.message)}). <button class="btn" onclick="endSession()">Try again</button></div>`; }
   finally { $("endBtn").disabled = false; poll(); }
 }
 
+async function waitForAnalysis() {
+  const sid = report && report.session_id;
+  for (let i = 0; i < 60 && report && report.generated_by === "pending"; i++) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    try {
+      const r = await api("/session/summary");
+      if (r.session_id !== sid || view !== "report") return;
+      report = r; renderReport();
+    } catch { return; }
+  }
+}
+
 async function loadReport() {
-  try { report = await api("/session/summary"); show("report"); renderReport(); } catch {}
+  try { report = await api("/session/summary"); show("report"); renderReport(); waitForAnalysis(); } catch {}
 }
 
 async function toggleDrift() {
@@ -620,14 +632,17 @@ function listen() {
 
 // ---------------------------------------------------------------- report
 function renderReport() {
-  const st = report.stats, an = report.analysis;
+  const pending = report.generated_by === "pending";
+  const st = report.stats;
+  const an = report.analysis || { headline: "", missed_topics: [], patterns: [], tips: [], lecture_summary: "" };
+  const W = '<span class="by">Writing…</span>';
   const maxSec = Math.max(1, ...st.causes.map((c) => c.seconds));
   const hist = [...(report.history || []), { date: "today", percent: st.percent, cur: true }];
   const maxP = Math.max(10, ...hist.map((h) => h.percent));
   $("report").innerHTML = `
     <section class="r-hero">
       <h1 class="r-title">You missed ${fmt(st.missed)} <span class="of">of ${fmt(st.duration)}.</span></h1>
-      <p class="r-sub">${esc(an.headline)}</p>
+      <p class="r-sub">${pending ? "Writing your report…" : esc(an.headline)}</p>
     </section>
     <div class="figs">
       <div class="fig"><b>${Math.round(st.percent)}%</b><span>of class missed</span></div>
@@ -635,11 +650,11 @@ function renderReport() {
       <div class="fig"><b>${fmt(st.longest)}</b><span>longest drift</span></div>
       <div class="fig"><b>${fmt(st.average)}</b><span>average drift</span></div>
     </div>
-    ${an.lecture_summary ? `<section class="section" style="margin-top:34px">
+    ${pending || an.lecture_summary ? `<section class="section" style="margin-top:34px">
       <div class="head"><h2>What the lecture covered</h2></div>
-      <p class="lect">${esc(an.lecture_summary)}</p>
+      <p class="lect">${pending ? W : esc(an.lecture_summary)}</p>
     </section>` : ""}
-    <section class="section cols" style="margin-top:${an.lecture_summary ? 0 : 34}px">
+    <section class="section cols" style="margin-top:${pending || an.lecture_summary ? 0 : 34}px">
       <div>
         <div class="head"><h2>Why you drifted</h2></div>
         <div class="bars">${st.causes.length ? st.causes.map((c) => `
@@ -648,14 +663,14 @@ function renderReport() {
       </div>
       <div>
         <div class="head"><h2>Your patterns</h2></div>
-        <ul class="list">${an.patterns.map((p) => `<li>${esc(p)}</li>`).join("") || '<li>Not enough data yet.</li>'}</ul>
+        <ul class="list">${pending ? W : an.patterns.map((p) => `<li>${esc(p)}</li>`).join("") || '<li>Not enough data yet.</li>'}</ul>
       </div>
     </section>
     <section class="section">
       <div class="head"><h2>What you missed</h2><small class="topics" title="${esc(an.missed_topics.join(", "))}">${an.missed_topics.map(esc).join(", ")}</small></div>
       <div class="missed-list">${st.drifts.map((d) => `
         <div class="m-item"><div class="m-when"><b>${fmt(d.at)} to ${fmt(d.at + d.length)}</b>${esc(d.detail || d.label)}</div>
-        <div class="m-text">${esc(d.recap || "No recap for this one.")}
+        <div class="m-text">${d.recap ? esc(d.recap) : pending ? W : "No recap for this one."}
           <details class="said-r"><summary>What was said</summary>${(() => {
             const T0 = report.start_time, ls = linesBetween(report.transcript, T0 + d.at, T0 + d.at + d.length);
             return ls.length ? saidHTML(ls, T0) : '<div class="none">No speech captured.</div>'; })()}</details>
@@ -664,7 +679,7 @@ function renderReport() {
     <section class="section cols">
       <div>
         <div class="head"><h2>Try this next class</h2></div>
-        <ol class="tips">${an.tips.map((t) => `<li><span>${esc(t)}</span></li>`).join("")}</ol>
+        ${pending ? W : `<ol class="tips">${an.tips.map((t) => `<li><span>${esc(t)}</span></li>`).join("")}</ol>`}
       </div>
       <div>
         <div class="head"><h2>Compared with earlier sessions</h2><small>share of class missed</small></div>
@@ -680,7 +695,7 @@ function renderReport() {
       <button class="btn dark" onclick="downloadNotes()">Download notes</button>
       <button class="btn" onclick="startSession()">Start a new session</button>
       <button class="btn ghost" onclick="loadPast()">All past sessions</button>
-      <span class="by">${{ gemini: "Analysis by Gemini 4", openai: "Analysis by OpenAI" }[report.generated_by] || "AI unavailable, showing a basic analysis"}</span>
+      <span class="by">${pending ? "Writing the analysis…" : { gemini: "Analysis by Gemini 4", openai: "Analysis by OpenAI" }[report.generated_by] || "AI unavailable, showing a basic analysis"}</span>
     </div>`;
 }
 
@@ -700,7 +715,8 @@ function fullTranscriptHTML() {
 }
 
 function downloadNotes() {
-  const st = report.stats, an = report.analysis, t0 = report.start_time || state.start_time;
+  const st = report.stats, t0 = report.start_time || state.start_time;
+  const an = report.analysis || { headline: "", missed_topics: [], patterns: [], tips: [], lecture_summary: "" };
   const transcript = report.transcript || state.transcript || [];
   const date = new Date(t0 * 1000).toLocaleString();
   let md = `# Ketchup notes, ${date}\n\nYou missed **${fmt(st.missed)}** of ${fmt(st.duration)} (${Math.round(st.percent)}%), across ${st.count} drift(s).\n\n${an.headline}\n\n${an.lecture_summary ? `## What the lecture covered\n\n${an.lecture_summary}\n\n` : ""}## What you missed\n\n`;

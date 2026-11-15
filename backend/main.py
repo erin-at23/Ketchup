@@ -410,8 +410,8 @@ def call_gemini(text):  # name kept for older code paths; uses whichever AI is c
     return ask_llm(PROMPT.format(transcript=text))
 
 
-async def make_recap(session_id, drift_id):
-    await asyncio.sleep(RECAP_DELAY)
+async def make_recap(session_id, drift_id, delay=None):
+    await asyncio.sleep(RECAP_DELAY if delay is None else delay)
     if S["session_id"] != session_id:  # session was reset meanwhile
         return
     d = S["drifts"][drift_id]
@@ -647,7 +647,7 @@ async def _build_summary():
         for r in st["drifts"]) or "(no drifts)"
     stats_txt = json.dumps({k: (round(v, 1) if isinstance(v, float) else v) for k, v in st.items()
                             if k not in ("drifts", "causes")})
-    transcript = " ".join(l["text"] for l in S["transcript"])[-MAX_INPUT_CHARS:] or "(none)"
+    transcript = " ".join(l["text"] for l in S["transcript"])[-4000:] or "(none)"
     analysis, by = None, "fallback"
     try:
         raw = await asyncio.wait_for(asyncio.to_thread(ask_llm, SUMMARY_PROMPT.format(
@@ -685,19 +685,31 @@ async def session_end():
     sid = S["session_id"]
     if S["ended_at"] is None:
         S["ended_at"] = time.time()
-        for d in S["drifts"].values():  # close any drift still open
+        for d in S["drifts"].values():  # close any drift still open; recap it right away
             if d["end"] is None:
                 d["end"], d["status"] = S["ended_at"], "pending"
-                asyncio.create_task(make_recap(sid, d["drift_id"]))
-    deadline = time.time() + RECAP_DELAY + PROVIDER_TIMEOUT * 2 + 8
+                asyncio.create_task(make_recap(sid, d["drift_id"], delay=1))
+    # Answer right away with the numbers; the AI-written parts are filled in by a background task
+    # and the page polls GET /session/summary until generated_by is no longer "pending".
+    S["summary"] = {"session_id": sid, "date": time.strftime("%a %b %d, %I:%M %p"),
+                    "start_time": S["start_time"], "transcript": S["transcript"],
+                    "stats": _stats(), "analysis": None, "generated_by": "pending",
+                    "history": [{"date": h.get("date"), "percent": h["percent"]} for h in _load_history()[-5:]]}
+    asyncio.create_task(_finish_report(sid))
+    return S["summary"]
+
+
+async def _finish_report(sid):
+    deadline = time.time() + PROVIDER_TIMEOUT + 5
     while any(d["status"] != "ready" for d in S["drifts"].values()) and time.time() < deadline:
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
+    if S["session_id"] != sid:
+        return
     summary = await _build_summary()
     if S["session_id"] == sid:
         S["summary"] = summary
     log.info("session %s ended: missed %.0f%% (%d drifts), report by %s",
              sid, summary["stats"]["percent"], summary["stats"]["count"], summary["generated_by"])
-    return summary
 
 
 @app.get("/session/summary")
