@@ -17,3 +17,4 @@ audio/*.ogg
 audio/demo-transcriber.log
 backend/sessions.json
 camera/camera.log
+audio/band.log

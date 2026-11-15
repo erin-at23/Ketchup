@@ -202,24 +202,63 @@ class Backend(threading.Thread):
 # ---------------------------------------------------------------- step 1: on target?
 
 class Heartbeat(threading.Thread):
-    """Tells the backend every 2 s that the camera is running and what it sees, so the
-    Ketchup page can show a live camera status. Never blocks the video loop."""
+    """Talks to the Ketchup backend from background threads so the video never freezes:
+    - every 2 s: status ping (the page shows it); the reply can carry key commands from the page
+    - ~4 times a second: the annotated frame as a JPEG (the page shows the live camera view)"""
+
+    ALLOWED_KEYS = set("cxd[]")
 
     def __init__(self, api):
         super().__init__(daemon=True)
-        self.url = api.rstrip("/") + "/camera/ping" if api else None
+        self.api = api.rstrip("/") if api else None
         self.info = {}
+        self.commands = []
+        self._jpg = None
+        self._jpg_t = 0.0
+        if self.api:
+            threading.Thread(target=self._frames, daemon=True).start()
 
     def update(self, **info):
         self.info = info
 
+    def frame(self, bgr):
+        """Called from the video loop after drawing; encodes at most ~4 frames a second."""
+        now = time.time()
+        if not self.api or now - self._jpg_t < 0.25:
+            return
+        self._jpg_t = now
+        h, w = bgr.shape[:2]
+        small = cv2.resize(bgr, (640, int(640 * h / w))) if w > 640 else bgr
+        ok, jpg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if ok:
+            self._jpg = jpg.tobytes()
+
+    def next_key(self):
+        return ord(self.commands.pop(0)) if self.commands else None
+
     def run(self):
-        while self.url:
+        while self.api:
             try:
-                requests.post(self.url, json=self.info, timeout=1.5)
+                r = requests.post(self.api + "/camera/ping", json=self.info, timeout=1.5)
+                for k in (r.json().get("commands") or []):
+                    if k in self.ALLOWED_KEYS:
+                        self.commands.append(k)
             except Exception:
                 pass
-            time.sleep(2)
+            time.sleep(0.5 if self.commands else 2)
+
+    def _frames(self):
+        last = None
+        while True:
+            jpg = self._jpg
+            if jpg is not None and jpg is not last:
+                last = jpg
+                try:
+                    requests.post(self.api + "/camera/frame", data=jpg,
+                                  headers={"Content-Type": "image/jpeg"}, timeout=1.5)
+                except Exception:
+                    pass
+            time.sleep(0.2)
 
 
 class TargetMatcher:
@@ -790,8 +829,11 @@ def main():
                 info = {"state": shown_state, "why": why, "inliers": inliers, "thr": thr,
                         "verdict": vtxt, "backend": backend.status}
                 draw(frame, info, objs, matcher, scale)
+                beat.frame(frame)
                 cv2.imshow("Rewind drift", frame)
                 key = cv2.waitKey(1) & 0xFF
+                if key == 255:                      # no key pressed: take one sent from the Ketchup page
+                    key = beat.next_key() or 255
                 if key == ord("q"):
                     break
                 elif key == ord("c"):

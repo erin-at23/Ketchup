@@ -101,6 +101,10 @@ _gemini = None
 CAMERA = {"t": 0.0}  # last heartbeat from the camera script (camera/drift.py)
 CAMERA_DIR = Path(os.getenv("CAMERA_DIR") or Path(__file__).resolve().parent.parent / "camera")
 CAMERA_PROC = {"p": None, "log": None}  # camera started from the page
+CAMERA_FRAME = {"jpg": None, "t": 0.0}  # latest annotated camera frame (shown live on the page)
+CAMERA_CMDS = []                          # key presses sent from the page to the camera (c, x, d, [, ])
+REPO_DIR = Path(__file__).resolve().parent.parent
+BAND_PROC = {"p": None, "log": None, "mode": None}  # audio/transcribe.py started from the page
 
 
 def gemini():
@@ -151,7 +155,7 @@ class Line(BaseModel):
 async def log_requests(request: Request, call_next):
     t0 = time.time()
     response = await call_next(request)
-    if request.url.path not in ("/state", "/focus", "/camera/ping"):  # polled constantly; would flood the log
+    if request.url.path not in ("/state", "/focus", "/camera/ping", "/camera/frame", "/camera/stream"):  # polled constantly; would flood the log
         log.info("%s %s -> %s (%.0f ms)", request.method, request.url.path,
                  response.status_code, (time.time() - t0) * 1000)
     return response
@@ -221,6 +225,43 @@ class CameraPing(BaseModel):
 async def camera_ping(body: CameraPing):
     """Heartbeat from camera/drift.py every 2 s (works with or without a session)."""
     CAMERA.update(body.model_dump(), t=time.time())
+    cmds = CAMERA_CMDS[:]
+    CAMERA_CMDS.clear()
+    return {"ok": True, "commands": cmds}
+
+
+@app.post("/camera/frame")
+async def camera_frame_in(request: Request):
+    CAMERA_FRAME.update(jpg=await request.body(), t=time.time())
+    return {"ok": True}
+
+
+@app.get("/camera/stream")
+async def camera_stream():
+    """MJPEG stream of the camera view: <img src="/camera/stream">."""
+    from fastapi.responses import StreamingResponse
+
+    async def gen():
+        last = None
+        while True:
+            jpg = CAMERA_FRAME["jpg"]
+            if jpg is not None and jpg is not last and time.time() - CAMERA_FRAME["t"] < 5:
+                last = jpg
+                yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
+            await asyncio.sleep(0.1)
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+class CameraKey(BaseModel):
+    key: str
+
+
+@app.post("/camera/key")
+async def camera_key(body: CameraKey):
+    """Press a camera key from the page: c (set lecture view), x (clear), d (manual drift), [ or ] (threshold)."""
+    if body.key not in ("c", "x", "d", "[", "]"):
+        raise HTTPException(status_code=400, detail="Allowed keys: c x d [ ]")
+    CAMERA_CMDS.append(body.key)
     return {"ok": True}
 
 
@@ -248,7 +289,9 @@ async def state():
         "start_time": S["start_time"],
         "now": S["ended_at"] or time.time(),
         "ended_at": S["ended_at"],
-        "camera": {**CAMERA, "connected": time.time() - CAMERA["t"] < 6, **_camera_proc_state()},
+        "camera": {**CAMERA, "connected": time.time() - CAMERA["t"] < 6, **_camera_proc_state(),
+                   "streaming": time.time() - CAMERA_FRAME["t"] < 3},
+        "band": _band_state(),
         "drifts": sorted(S["drifts"].values(), key=lambda d: d["drift_id"]),
         "transcript": S["transcript"],
         "recaps": sorted(S["recaps"].values(), key=lambda r: r["drift_id"]),
@@ -726,3 +769,79 @@ async def camera_stop():
         p.kill()
     CAMERA["t"] = 0.0
     return {"running": False}
+
+
+# ---------------------------------------------------------------- connect the Vexo band from the page
+def _band_state():
+    p = BAND_PROC["p"]
+    if p is None:
+        return {"running": False, "status": "off", "detail": None, "mode": None}
+    try:
+        lines = [l.strip() for l in (REPO_DIR / "audio" / "band.log").read_text(errors="replace").splitlines() if l.strip()]
+    except Exception:  # noqa: BLE001
+        lines = []
+    text = "\n".join(lines)
+    code = p.poll()
+    if code is not None:
+        tail = " / ".join(lines[-2:])[-300:] if lines else f"exited with code {code}"
+        return {"running": False, "status": "stopped" if code in (0, -2, 130) else "error",
+                "detail": None if code in (0, -2, 130) else tail, "mode": BAND_PROC["mode"]}
+    if "Connected to Vexo" in text or "Microphone on" in text:
+        status = "listening"
+        if "band link lost" in lines[-1] if lines else False:
+            status = "reconnecting"
+    elif "Could not see" in text or "not see" in text:
+        status = "searching"
+    else:
+        status = "connecting"
+    last = next((l for l in reversed(lines) if not l.startswith("[")), lines[-1] if lines else "")
+    return {"running": True, "status": status, "detail": last[-200:], "mode": BAND_PROC["mode"]}
+
+
+class BandStart(BaseModel):
+    mode: str = "focus"   # "focus": audio leaves the laptop only while zoned out; "always": transcribe everything
+    usb: bool = False
+
+
+@app.post("/band/start")
+async def band_start(body: BandStart):
+    import subprocess
+    import sys
+    if BAND_PROC["p"] is not None and BAND_PROC["p"].poll() is None:
+        return _band_state()
+    script = REPO_DIR / "audio" / "transcribe.py"
+    if not script.exists() or not (REPO_DIR / "vexo-open-kit").exists():
+        raise HTTPException(status_code=404, detail="Can't find audio/transcribe.py and vexo-open-kit/ next to backend/. "
+                                                    "Run the server from the Ketchup folder and clone vexo-open-kit there.")
+    py = os.getenv("BAND_PYTHON") or sys.executable
+    check = subprocess.run([py, "-c", "import bleak, certifi"], capture_output=True)
+    if check.returncode != 0:
+        raise HTTPException(status_code=400, detail="The Bluetooth package is missing. In the server's terminal run: "
+                                                    "pip install bleak certifi   then click Connect again.")
+    args = [py, str(script)]
+    if body.mode == "always":
+        args.append("--always")
+    if body.usb:
+        args.append("--usb")
+    logf = open(REPO_DIR / "audio" / "band.log", "w")
+    env = dict(os.environ, PYTHONUNBUFFERED="1", REWIND_API=f"http://localhost:{os.getenv('PORT', '8001')}")
+    BAND_PROC.update(p=subprocess.Popen(args, cwd=str(REPO_DIR), env=env, stdout=logf, stderr=subprocess.STDOUT),
+                     log=logf, mode=body.mode)
+    log.info("band transcriber started (pid %s, %s mode)", BAND_PROC["p"].pid, body.mode)
+    return _band_state()
+
+
+@app.post("/band/stop")
+async def band_stop():
+    import signal
+    p = BAND_PROC["p"]
+    if p is None or p.poll() is not None:
+        return _band_state()
+    p.send_signal(signal.SIGINT)  # turns the band's mic off and flushes the last lines
+    for _ in range(50):
+        if p.poll() is not None:
+            break
+        await asyncio.sleep(0.2)
+    if p.poll() is None:
+        p.kill()
+    return _band_state()

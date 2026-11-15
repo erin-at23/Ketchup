@@ -174,6 +174,34 @@
   .cam .err { color: var(--signal-ink); }
   .cam code { color: var(--ink-2); background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
 
+  .devices { display: grid; gap: 2px; }
+  .camview { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: clamp(16px, 3vw, 32px); align-items: start; }
+  .screen { position: relative; aspect-ratio: 4 / 3; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+            overflow: hidden; box-shadow: var(--shadow); display: grid; place-items: center; }
+  .screen img { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .screen .ph { font: 12.5px var(--mono); color: var(--faint); text-align: center; padding: 20px; line-height: 1.8; }
+  .screen .live { position: absolute; bottom: 10px; left: 10px; font: 500 11px var(--mono); color: #fff; background: rgba(0,0,0,.55);
+                  padding: 3px 8px; border-radius: 999px; display: flex; gap: 6px; align-items: center; }
+  .screen .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--signal); animation: ping 1.6s infinite; }
+  .ctrls { display: grid; gap: 10px; }
+  .ctrls .btn { justify-self: start; }
+  .ctrls p { margin: 0; font-size: 14.5px; color: var(--ink-2); max-width: 40ch; }
+  .ctrls .row2 { display: flex; gap: 8px; flex-wrap: wrap; }
+  dialog { border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 0;
+           width: min(520px, calc(100vw - 32px)); box-shadow: 0 30px 80px -20px rgba(0,0,0,.6); }
+  dialog::backdrop { background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
+  .dlg { padding: 26px 26px 22px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.03em; font-weight: 500; }
+  .dlg .sub { margin: 0 0 18px; color: var(--muted); font-size: 14.5px; }
+  .dlg ol { margin: 0 0 18px; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 12px; }
+  .dlg ol li { counter-increment: s; display: grid; grid-template-columns: 30px 1fr; color: var(--ink-2); font-size: 15px; }
+  .dlg ol li::before { content: counter(s); font: 500 13px/1.6 var(--mono); color: var(--signal-ink); }
+  .dlg ol li b { color: var(--ink); font-weight: 500; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px; color: var(--ink-2); margin: 8px 0; cursor: pointer; }
+  .opt input { margin-top: 4px; accent-color: var(--signal); }
+  .dlg .acts { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  .dlg .msg { font: 12.5px var(--mono); color: var(--muted); margin-top: 12px; min-height: 18px; }
+  .dlg .msg.err { color: var(--signal-ink); }
   .past { padding-top: clamp(36px, 6vw, 64px); padding-bottom: 60px; }
   .past h1 { font-size: clamp(40px, 6vw, 68px); letter-spacing: -0.05em; font-weight: 500; margin: 0 0 26px; line-height: 1; }
   .p-row { display: grid; grid-template-columns: 1.4fr 1fr .8fr 1fr auto; gap: 16px; align-items: center; width: 100%;
@@ -204,6 +232,7 @@
   @keyframes fall { to { transform: translateY(105vh) rotate(720deg); opacity: .9; } }
 
   @media (max-width: 820px) {
+    .camview { grid-template-columns: 1fr; }
     .p-row { grid-template-columns: 1fr auto; }
     .p-row .hide-sm { display: none; }
     .hero, .catch, .cols { grid-template-columns: 1fr; }
@@ -238,12 +267,35 @@
       <h1 id="state" class="state">Ready.</h1>
       <p id="why" class="why">Start a session, then teach the camera where the lecture is.</p>
       <div class="manual"><button id="driftBtn" class="btn">Mark zoned out</button><span><kbd>D</kbd> also works</span></div>
-      <div id="cam" class="cam"><span class="dot"></span><span id="camText">Camera not connected</span><button id="camBtn" class="btn" type="button">Start camera</button></div>
+      <div class="devices">
+        <div id="cam" class="cam"><span class="dot"></span><span id="camText">Camera not connected</span><button id="camBtn" class="btn" type="button">Start camera</button></div>
+        <div id="band" class="cam"><span class="dot"></span><span id="bandText">Vexo band not connected</span><button id="bandBtn" class="btn" type="button">Connect band</button></div>
+      </div>
     </div>
     <div class="tally" aria-live="polite">
       <div><b id="tMissed">0:00</b><span>missed</span></div>
       <div><b id="tCount">0</b><span>drifts</span></div>
       <div><b id="tPct">0%</b><span>of class</span></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="head"><h2>What the camera sees</h2><small id="camHint">live view from the camera, with what it detects</small></div>
+    <div class="camview">
+      <div class="screen" id="screen"><div class="ph">No camera view yet.<br>Click <b>Start camera</b> above.</div></div>
+      <div class="ctrls">
+        <p>Point the camera at the slides or the speaker, then save that view so Ketchup knows what "paying attention" looks like.</p>
+        <button class="btn dark" type="button" data-key="c">Save this as the lecture view</button>
+        <div class="row2">
+          <button class="btn" type="button" data-key="x">Clear saved views</button>
+          <button class="btn" type="button" data-key="d">Camera: mark zoned out</button>
+        </div>
+        <div class="row2">
+          <button class="btn" type="button" data-key="]">Stricter match</button>
+          <button class="btn" type="button" data-key="[">Looser match</button>
+        </div>
+        <div class="hint">Save 2–3 views (slides, speaker, board). Use stricter if it says focused while you look away.</div>
+      </div>
     </div>
   </section>
 
@@ -277,6 +329,27 @@
   </section>
 </main>
 
+<dialog id="bandDlg">
+  <form method="dialog" class="dlg" id="bandForm">
+    <h2>Connect the Vexo band</h2>
+    <p class="sub">The band's microphone records the lecture so Ketchup can catch you up.</p>
+    <ol>
+      <li><span><b>Charge it and turn it on.</b> Use band <b>Vexo-HACK-08</b>.</span></li>
+      <li><span><b>Close anything else connected to it</b>, like the Vexo dashboard or a teammate's laptop. The band takes one connection at a time.</span></li>
+      <li><span><b>Turn on Bluetooth</b> on this Mac. If macOS asks whether Terminal can use Bluetooth, click Allow.</span></li>
+      <li><span><b>Double-tap the band.</b> Its light blinks blue for 60 seconds, which means it's ready.</span></li>
+      <li><span><b>Click Connect now</b> while it's blinking. When the light turns solid blue, the mic is on.</span></li>
+    </ol>
+    <label class="opt"><input type="checkbox" id="optAlways"><span><b>Transcribe everything.</b> Off by default: audio is only sent while you're zoned out (plus the minute before), which keeps the lecture private.</span></label>
+    <label class="opt"><input type="checkbox" id="optUsb"><span><b>Use the USB cable</b> instead of Bluetooth (no double-tap needed).</span></label>
+    <div id="bandMsg" class="msg"></div>
+    <div class="acts">
+      <button class="btn" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn dark" id="bandGo" type="button">Connect now</button>
+    </div>
+  </form>
+</dialog>
+
 <main id="report" class="wrap" hidden></main>
 <main id="past" class="wrap past" hidden></main>
 
@@ -306,7 +379,11 @@ try { setTheme(localStorage.getItem("ketchup-theme") || "dark"); } catch { setTh
 
 async function api(path, opts = {}) {
   const r = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...opts });
-  if (!r.ok) { const e = new Error(path + " returned " + r.status); e.status = r.status; throw e; }
+  if (!r.ok) {
+    const e = new Error(path + " returned " + r.status); e.status = r.status;
+    try { e.detail = (await r.json()).detail; } catch {}
+    throw e;
+  }
   return r.json();
 }
 const post = (path, body = {}) => api(path, { method: "POST", body: JSON.stringify(body) });
@@ -340,9 +417,46 @@ async function poll() {
     $("endBtn").hidden = !state.start_time || !!state.ended_at;
     if (state.ended_at && !report && view === "live") loadReport();
     renderCamera();
+    renderScreen(state.camera || {});
+    renderBand();
     render();
   } catch (e) {
     $("pulse").className = "pulse bad"; $("clock").textContent = "backend unreachable";
+  }
+}
+
+let streamOn = false;
+function renderScreen(c) {
+  const live = c.connected && c.streaming;
+  if (live && !streamOn) {
+    $("screen").innerHTML = `<img src="${API}/camera/stream?ts=${Date.now()}" alt="Live camera view"><span class="live"><i></i>live</span>`;
+    streamOn = true;
+  } else if (!live && streamOn) {
+    $("screen").innerHTML = `<div class="ph">${c.connected ? "Waiting for the camera picture…" : "No camera view yet.<br>Click <b>Start camera</b> above."}</div>`;
+    streamOn = false;
+  }
+}
+
+const BAND_TEXT = {
+  off: "Vexo band not connected",
+  connecting: "Connecting to the band… double-tap it if it isn't blinking blue",
+  searching: "Can't see the band yet. Double-tap it and keep it close",
+  listening: "Vexo band connected · mic on",
+  reconnecting: "Band link dropped · reconnecting",
+  stopped: "Vexo band disconnected",
+  error: "Band stopped",
+};
+function renderBand() {
+  const b = state.band || {};
+  $("band").className = "cam" + (b.status === "listening" ? " on" : "");
+  let t = BAND_TEXT[b.status] || BAND_TEXT.off;
+  if (b.status === "listening") t += b.mode === "always" ? " · transcribing everything" : " · sends audio only while you're zoned out";
+  $("bandText").innerHTML = b.status === "error" ? `<span class="err">${esc(t)}: ${esc(b.detail || "")}</span>` : esc(t);
+  $("bandBtn").textContent = b.running ? "Disconnect band" : "Connect band";
+  if ($("bandDlg").open) {
+    if (b.status === "listening") { $("bandDlg").close(); }
+    else if (b.running) { $("bandMsg").className = "msg"; $("bandMsg").textContent = t + (b.detail ? " — " + b.detail : ""); }
+    else if (b.status === "error") { $("bandMsg").className = "msg err"; $("bandMsg").textContent = b.detail || "The band script stopped."; }
   }
 }
 
@@ -739,6 +853,26 @@ function showMascot(r) {
 }
 
 // ---------------------------------------------------------------- wiring
+$("bandBtn").onclick = async () => {
+  const b = (state && state.band) || {};
+  if (b.running) { await post("/band/stop").catch(() => {}); poll(); return; }
+  $("bandMsg").textContent = ""; $("bandMsg").className = "msg";
+  $("bandDlg").showModal();
+};
+$("bandGo").onclick = async () => {
+  $("bandMsg").className = "msg"; $("bandMsg").textContent = "Starting… keep the band blinking blue.";
+  try {
+    await post("/band/start", { mode: $("optAlways").checked ? "always" : "focus", usb: $("optUsb").checked });
+    poll();
+  } catch (e) {
+    $("bandMsg").className = "msg err"; $("bandMsg").textContent = e.detail || e.message;
+  }
+};
+document.querySelectorAll("[data-key]").forEach((btn) => btn.onclick = async () => {
+  if (!(state && state.camera && state.camera.connected)) { $("camHint").textContent = "Start the camera first"; return; }
+  try { await post("/camera/key", { key: btn.dataset.key }); $("camHint").textContent = "Sent to the camera"; setTimeout(() => $("camHint").textContent = "live view from the camera, with what it detects", 2500); }
+  catch (e) { $("camHint").textContent = "Couldn't reach the camera"; }
+});
 $("camBtn").onclick = async () => {
   const c = (state && state.camera) || {};
   try {
@@ -756,7 +890,7 @@ $("askBtn").onclick = askMissed;
 $("micBtn").onclick = listen;
 $("askForm").onsubmit = (e) => { e.preventDefault(); askQuestion($("askInput").value); $("askInput").value = ""; };
 document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.repeat || e.metaKey || e.ctrlKey) return;
+  if (e.target.tagName === "INPUT" || e.repeat || e.metaKey || e.ctrlKey || $("bandDlg").open) return;
   if (e.key === "d" || e.key === "D") toggleDrift();
   else if (e.key === " ") { e.preventDefault(); askMissed(); }
   else if (e.key === "v" || e.key === "V") listen();
