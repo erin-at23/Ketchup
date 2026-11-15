@@ -44,6 +44,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 # which AI writes recaps/answers/reports: "openai" or "gemini". The other one is the backup.
 LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or ("openai" if OPENAI_API_KEY else "gemini")).strip().lower()
+# the end-of-session report can use a different AI (one call per session), e.g. REPORT_PROVIDER=gemini
+REPORT_PROVIDER = (os.getenv("REPORT_PROVIDER") or LLM_PROVIDER).strip().lower()
 LAST_PROVIDER = {"name": None}
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-hydrogen")  # fast Gemini 4, free tier (builder guide)
 GEMINI_THINKING = os.getenv("GEMINI_THINKING", "low")  # hydrogen: low | medium | high | xhigh (never "minimal")
@@ -332,10 +334,10 @@ def ask_openai(prompt):
     return out
 
 
-def ask_llm(prompt):
-    """Ask the chosen AI (LLM_PROVIDER); if it fails, try the other one."""
+def ask_llm(prompt, prefer=None):
+    """Ask the chosen AI (LLM_PROVIDER, or `prefer`); if it fails, try the other one."""
     order = [("openai", ask_openai), ("gemini", ask_gemini)]
-    if LLM_PROVIDER != "openai":
+    if (prefer or LLM_PROVIDER) != "openai":
         order.reverse()
     errors = []
     for name, fn in order:
@@ -593,7 +595,7 @@ async def _build_summary():
     analysis, by = None, "fallback"
     try:
         raw = await asyncio.wait_for(asyncio.to_thread(ask_llm, SUMMARY_PROMPT.format(
-            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript)), GEMINI_TIMEOUT + 40)
+            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript), REPORT_PROVIDER), GEMINI_TIMEOUT + 40)
         analysis = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
         for k in ("missed_topics", "patterns", "tips"):
             analysis[k] = [str(x) for x in analysis.get(k, [])][:5]
