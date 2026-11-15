@@ -6,8 +6,6 @@
 
 **A wearable that pays attention with you.** Ketchup notices the moment your mind drifts in a lecture, keeps listening while you're gone, and tells you exactly what you missed when you're back.
 
-Built in six hours at **VexoHacks** · Stanford · November 14, 2026
-
 ![Vexo band](https://img.shields.io/badge/hardware-Vexo%20band-e2501d)
 ![Deepgram](https://img.shields.io/badge/speech-Deepgram-161513)
 ![OpenAI](https://img.shields.io/badge/AI-GPT--4.1%20mini-161513)
