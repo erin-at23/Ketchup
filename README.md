@@ -18,9 +18,7 @@
 
 ## The problem
 
-Most students drift for about a third of every lecture. In a 90-minute class, that's 30 minutes gone, every class, every day.
-
-The worst part: you don't notice when you drift. One tab switch and the professor is three slides ahead. After class you're scrubbing a 90-minute recording looking for the part you missed, if there even is a recording.
+Everyone zones out in class sometimes, and the hard part is that you don't notice when it happens. One tab switch and the professor is three slides ahead, and you stay lost for the rest of the lecture. After class, you're scrubbing through a recording trying to find the part you missed, if there even is a recording.
 
 ## What Ketchup does
 
