@@ -1,0 +1,4 @@
+pipecat-ai[deepgram,elevenlabs,google,local]==1.16.0
+requests
+python-dotenv
+certifi
