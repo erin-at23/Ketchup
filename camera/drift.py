@@ -204,18 +204,21 @@ class Backend(threading.Thread):
 class Heartbeat(threading.Thread):
     """Talks to the Ketchup backend from background threads so the video never freezes:
     - every 2 s: status ping (the page shows it); the reply can carry key commands from the page
-    - ~4 times a second: the annotated frame as a JPEG (the page shows the live camera view)"""
+    - only with --share-view: ~4 times a second the annotated frame as a JPEG (live camera view).
+      Off by default: camera frames must not leave the laptop (privacy rule, camera/CLAUDE.md),
+      and the backend would serve them to anyone with the tunnel URL."""
 
     ALLOWED_KEYS = set("cxd[]")
 
-    def __init__(self, api):
+    def __init__(self, api, share_view=False):
         super().__init__(daemon=True)
         self.api = api.rstrip("/") if api else None
+        self.share_view = share_view
         self.info = {}
         self.commands = []
         self._jpg = None
         self._jpg_t = 0.0
-        if self.api:
+        if self.api and self.share_view:
             threading.Thread(target=self._frames, daemon=True).start()
 
     def update(self, **info):
@@ -224,7 +227,7 @@ class Heartbeat(threading.Thread):
     def frame(self, bgr):
         """Called from the video loop after drawing; encodes at most ~4 frames a second."""
         now = time.time()
-        if not self.api or now - self._jpg_t < 0.25:
+        if not self.api or not self.share_view or now - self._jpg_t < 0.25:
             return
         self._jpg_t = now
         h, w = bgr.shape[:2]
@@ -650,6 +653,8 @@ def main():
     ap.add_argument("--headless", action="store_true", help="no window (for testing)")
     ap.add_argument("--calibrate-at", type=float, default=None, help="video mode: auto-press c at this second")
     ap.add_argument("--list-cameras", action="store_true")
+    ap.add_argument("--share-view", action="store_true",
+                    help="send the live camera view to the backend (off by default: frames stay on this laptop)")
     ap.add_argument("--fast", action="store_true",
                     help="video mode: replay as fast as possible (default: real speed when the AI check is on or a window is shown)")
     ap.add_argument("--verbose", action="store_true", help="print match/status once per second (numbers only, no frames)")
@@ -670,7 +675,9 @@ def main():
 
     backend = Backend(api, args.dry)
     backend.start()
-    beat = Heartbeat(None if args.dry else api)
+    beat = Heartbeat(None if args.dry else api, share_view=args.share_view)
+    if args.share_view and not args.dry:
+        print("[camera] --share-view: the live camera view is sent to the backend", flush=True)
     beat.start()
     matcher = TargetMatcher(cfg["max_targets"])
     detector = ScreenDetector(cfg["detector_score"])
