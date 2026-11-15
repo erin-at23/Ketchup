@@ -28,7 +28,7 @@ The worst part: you don't notice when you drift. One tab switch and the professo
 
 | | |
 | --- | --- |
-| 👀 **Notices** | An outward-facing camera knows what paying attention looks like for *you*. Your C++ code that matches the lecture? Focused. An Amazon tab? Drift, flagged within seconds, with the reason. |
+| 👀 **Notices** | A head-mounted, outward-facing camera knows what paying attention looks like for *you*. Your C++ code that matches the lecture? Focused. An Amazon tab? Drift, flagged within seconds, with the reason. |
 | 👂 **Listens** | The Vexo band keeps the last minute of the lecture in memory on your laptop, and streams to transcription **only while you're zoned out**. |
 | ⏪ **Catches you up** | Ask *"What did I miss?"* and hear a 20-second recap of exactly that gap, with the professor's exact words underneath. Ask follow-ups in plain language. |
 | 📈 **Coaches you** | End the session for a report: how much you missed, why you drifted, what the lecture covered, and three things to try next class. Every session is saved, so you can see your focus change week to week. |
@@ -78,7 +78,7 @@ flowchart LR
 
 - **Context-aware drift detection.** ORB feature matching against saved lecture views decides "on target". Off target, MediaPipe object detection finds phones, laptops and notes, and a vision model judges the screen against the live transcript, so related work stays focused.
 - **Two devices, one clock.** The camera and the band run as separate programs and never talk to each other. Every event carries a Unix timestamp, and the server lines drifts up with transcript lines after a 6-second settle window, so late words still land in the right recap.
-- **Privacy by design.** Audio sits in a 60-second rolling buffer on the laptop and is sent for transcription only while a drift is open (`GET /focus`). Camera frames never leave the laptop; only "when" and "why" do.
+- **Privacy by design.** Audio sits in a 60-second rolling buffer on the laptop and is sent for transcription only while a drift is open (`GET /focus`). Camera frames are processed on the laptop; a single frame goes to the vision model only when a screen is in view and needs a relevance check.
 - **Grounded answers.** Recaps and follow-up answers are generated only from the transcript slice around your drift, and the exact lines are shown beside every summary.
 - **Fast under pressure.** Recap audio is generated as soon as a drift ends, the end-of-session report renders immediately and fills in AI sections asynchronously, and every AI call has its own time limit so one slow request can't stall the demo.
 - **One-click hardware.** The web app starts the camera and connects the Vexo band (Bluetooth or USB) through the server, with step-by-step pairing instructions.
