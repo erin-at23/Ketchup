@@ -18,7 +18,7 @@
 
 ## The problem
 
-Students mind-wander for about **a third of every lecture** ([Wammes et al.](https://www.noba.to/blog/2016-07-25-are-your-students-paying-attention)). In a 90-minute class, that's 30 minutes gone, every class, every day.
+Most students drift for about a third of every lecture. In a 90-minute class, that's 30 minutes gone, every class, every day.
 
 The worst part: you don't notice when you drift. One tab switch and the professor is three slides ahead. After class you're scrubbing a 90-minute recording looking for the part you missed, if there even is a recording.
 
