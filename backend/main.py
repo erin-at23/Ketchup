@@ -43,10 +43,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 # which AI writes recaps/answers/reports: "openai" or "gemini". The other one is the backup.
-LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or ("openai" if OPENAI_API_KEY else "gemini")).strip().lower()
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or "openai").strip().lower()
+AI_BACKUP = os.getenv("AI_BACKUP", "0") == "1"  # 1 = if the chosen AI fails, try the other one
 # the end-of-session report can use a different AI (one call per session), e.g. REPORT_PROVIDER=gemini
-REPORT_PROVIDER = (os.getenv("REPORT_PROVIDER") or LLM_PROVIDER).strip().lower()
+REPORT_PROVIDER = (os.getenv("REPORT_PROVIDER") or LLM_PROVIDER).strip().lower()  # optional override for the report
 LAST_PROVIDER = {"name": None}
+PROVIDER_TIMEOUT = float(os.getenv("PROVIDER_TIMEOUT", "20"))  # seconds per AI before trying the other
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-hydrogen")  # fast Gemini 4, free tier (builder guide)
 GEMINI_THINKING = os.getenv("GEMINI_THINKING", "low")  # hydrogen: low | medium | high | xhigh (never "minimal")
 # Wait for late transcript lines. P2 stops streaming when focus returns and its last words
@@ -382,14 +384,25 @@ def ask_llm(prompt, prefer=None):
     order = [("openai", ask_openai), ("gemini", ask_gemini)]
     if (prefer or LLM_PROVIDER) != "openai":
         order.reverse()
+    if not AI_BACKUP:  # default: only the chosen AI, no fallback to the other
+        order = order[:1]
+    # Each AI gets its own time limit. A rate-limited key (429) makes the Google SDK retry for a
+    # long time; without a per-provider limit that would use up the whole wait and the backup
+    # would never be tried.
+    import concurrent.futures as cf
     errors = []
     for name, fn in order:
+        pool = cf.ThreadPoolExecutor(max_workers=1)
         try:
-            out = fn(prompt)
+            out = pool.submit(fn, prompt).result(timeout=PROVIDER_TIMEOUT)
             LAST_PROVIDER["name"] = name
             return out
+        except cf.TimeoutError:
+            errors.append(f"{name}: no answer within {PROVIDER_TIMEOUT:.0f}s")
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {e}")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
     raise RuntimeError(" | ".join(errors))
 
 
@@ -409,7 +422,7 @@ async def make_recap(session_id, drift_id):
         recap = EMPTY_RECAP
     else:
         try:
-            recap = await asyncio.wait_for(asyncio.to_thread(call_gemini, text), GEMINI_TIMEOUT + 10)
+            recap = await asyncio.wait_for(asyncio.to_thread(call_gemini, text), PROVIDER_TIMEOUT * 2 + 5)
         except Exception as e:  # noqa: BLE001 - never let a recap failure break the demo
             log.warning("AI recap failed (%s); using fallback", e)
             recap = fallback_recap(text)
@@ -531,7 +544,7 @@ async def ask(body: AskBody):
     try:
         answer = await asyncio.wait_for(
             asyncio.to_thread(ask_llm, ASK_PROMPT.format(context=context, question=body.question.strip()[:500])),
-            GEMINI_TIMEOUT + 20)
+            PROVIDER_TIMEOUT * 2 + 5)
     except Exception as e:  # noqa: BLE001
         log.warning("AI /ask failed (%s)", e)
         answer = "I couldn't reach the AI just now. Here's what was said: " + \
@@ -617,7 +630,7 @@ def _fallback_analysis(st):
                     + ([f"More drifts in the {'second' if st['second_half'] > st['first_half'] else 'first'} half of class."]
                        if st["count"] > 1 and st["first_half"] != st["second_half"] else []),
         "tips": [TIPS.get(c["cause"], TIPS["manual"]) for c in causes][:3] or [TIPS["manual"]],
-        "lecture_summary": " ".join(" ".join(l["text"] for l in S["transcript"]).split()[:80]),
+        "lecture_summary": "",
     }
 
 
@@ -638,7 +651,7 @@ async def _build_summary():
     analysis, by = None, "fallback"
     try:
         raw = await asyncio.wait_for(asyncio.to_thread(ask_llm, SUMMARY_PROMPT.format(
-            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript), REPORT_PROVIDER), GEMINI_TIMEOUT + 40)
+            stats=stats_txt, drifts=drift_txt, history=hist_txt, transcript=transcript), REPORT_PROVIDER), PROVIDER_TIMEOUT * 2 + 10)
         analysis = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
         for k in ("missed_topics", "patterns", "tips"):
             analysis[k] = [str(x) for x in analysis.get(k, [])][:5]
@@ -676,7 +689,7 @@ async def session_end():
             if d["end"] is None:
                 d["end"], d["status"] = S["ended_at"], "pending"
                 asyncio.create_task(make_recap(sid, d["drift_id"]))
-    deadline = time.time() + RECAP_DELAY + GEMINI_TIMEOUT + 14
+    deadline = time.time() + RECAP_DELAY + PROVIDER_TIMEOUT * 2 + 8
     while any(d["status"] != "ready" for d in S["drifts"].values()) and time.time() < deadline:
         await asyncio.sleep(0.5)
     summary = await _build_summary()
